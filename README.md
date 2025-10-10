@@ -8,7 +8,7 @@ So far, I was able to set up a virtualenv and install packages in it:
 # Connect to insomnia
 ssh <UNI>@insomnia.rcs.columbia.edu
 
-# Move to a compute node (if you want a GPU, add --gres=gpu:1)
+# Move to a compute node (if you want a GPU, add --gres=gpu:1 - useful if you want to use things like nvidia-smi)
 srun --pty -t 0-2:00 -A edu /bin/bash
 
 # Move into your scratch space and set up the environment
