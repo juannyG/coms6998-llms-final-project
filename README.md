@@ -1,8 +1,8 @@
 # coms6998-llms-final-project
 
 ## Setting up the python environment
-While HPC likes to use `conda`, creating a new environment seems to be broken. (Try if you can and we can update this later),
-but so far, I was able to set up a virtualenv and install packages in it.
+While HPC likes to use `conda`, creating a new environment seems to be broken. Try if you can and we can update this later.
+So far, I was able to set up a virtualenv and install packages in it:
 
 ```sh
 # Connect to insomnia
