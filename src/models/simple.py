@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 
-class SimpleTransformerLM(nn.Module):
+class SimpleTransformerDecoder(nn.Module):
     def __init__(self, vocab_size, d_model, n_heads, n_layers, d_ff, seq_len):
         super().__init__()
         self.tok_emb = nn.Embedding(vocab_size, d_model)
