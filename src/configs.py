@@ -2,7 +2,7 @@ import torch
 
 
 CONF = {
-    "baseline": {
+    "10m": {
         "vocab_size": 8000,
         "d_model": 320,
         "n_heads": 8,

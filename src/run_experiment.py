@@ -15,7 +15,7 @@ if __name__ == '__main__':
         description="Run the given experiment type for a given configuration",
     )
     parser.add_argument('experiment_type', choices=list(EXPERIMENT_TYPES.keys()))
-    parser.add_argument('configuration', choices=list(CONF.keys()))
+    parser.add_argument('model_configuration', choices=list(CONF.keys()))
     args = parser.parse_args()
 
     if not torch.cuda.is_available():
@@ -25,4 +25,4 @@ if __name__ == '__main__':
         exit(1)
 
     experiment = EXPERIMENT_TYPES[args.experiment_type]
-    experiment(CONF[args.configuration])
+    experiment(CONF[args.model_configuration])
