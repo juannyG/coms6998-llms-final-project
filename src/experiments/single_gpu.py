@@ -110,8 +110,6 @@ def run_single_gpu_experiment(model, conf, device):
     # PROFILER EXAMPLE
     # TODO: Modify to support multi-GPU setups
     steps = 8
-    opt = torch.optim.AdamW(model.parameters(), lr=conf["lr"])
-    it = iter(loader)
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                  profile_memory=True,
                  record_shapes=True,
@@ -123,7 +121,7 @@ def run_single_gpu_experiment(model, conf, device):
                 it = iter(loader)
                 batch = next(it)
             batch = batch.to(device, non_blocking=True)
-            opt.zero_grad()
+            optimizer.zero_grad()
             # TODO: This captures forward pass - probably want to include loss + backward steps in their own labels
             with record_function("model_forward"):
                 logits = model(batch)
@@ -131,5 +129,5 @@ def run_single_gpu_experiment(model, conf, device):
             targets = batch[:, 1:].contiguous().view(-1)
             loss = F.cross_entropy(logits, targets)
             loss.backward()
-            opt.step()
+            optimizer.step()
     print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
