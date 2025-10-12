@@ -34,9 +34,11 @@ def reset_peak_mem():
         torch.cuda.reset_peak_memory_stats()
 
 def gpu_utilization_percent():
-    handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-    util = pynvml.nvmlDeviceGetUtilizationRates(handle)
-    return util.gpu
+    if torch.cuda.is_available():
+        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+        return util.gpu
+    return 0
 
 def compute_throughput(tokens_processed, seconds):
     return tokens_processed / seconds if seconds > 0 else 0.0

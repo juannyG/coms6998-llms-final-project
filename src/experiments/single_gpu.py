@@ -6,7 +6,6 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.profiler import profile, record_function, ProfilerActivity
 
-from models.simple import SimpleTransformerDecoder
 from datasets.synthetic import SyntheticDataset
 from utils.gpu import (
     compute_throughput,
@@ -16,21 +15,9 @@ from utils.gpu import (
 )
 
 
-def run_single_gpu_experiment(conf):
+def run_single_gpu_experiment(model, conf, device):
     # TODO: This won't work for multi-GPU setups - diff strats have diff wrappers
-    # Likely need to pass the model in as an arg - and also the rank and flags indicating types
-    model = SimpleTransformerDecoder(
-        conf["vocab_size"],
-        conf["d_model"],
-        conf["n_heads"],
-        conf["n_layers"],
-        conf["d_ff"],
-        conf["seq_len"]
-    ).to("cuda")
-
-    print(f"Using configuration: {conf}")
-    print(f"Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
-
+    # Things like the rank and flags indicating types of experiment will likely be necessary
     dataset = SyntheticDataset(
         n_samples=10000,
         seq_len=conf["seq_len"],
@@ -59,7 +46,6 @@ def run_single_gpu_experiment(conf):
     warmup = conf["warmup_steps"]
     max_steps = conf["max_steps"]
     it = iter(loader)
-    device = "cuda" # TODO: revisit for multi-GPU setup
     for step in range(max_steps):
         try:
             batch = next(it)
