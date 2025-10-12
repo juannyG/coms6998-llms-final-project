@@ -6,7 +6,7 @@ Examples:
 python run_experiment.py single_gpu 10m
 
 # "Dry run" the experiment - only print out model param info
-python run_experiment --dry-run single_gpu cpu
+python run_experiment.py --dry-run single_gpu cpu
 ```
 
 ## Setting up the python environment
