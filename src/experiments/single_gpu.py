@@ -1,14 +1,24 @@
+import time
+
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from torch.profiler import profile, record_function, ProfilerActivity
 
 from models.simple import SimpleTransformerDecoder
 from datasets.synthetic import SyntheticDataset
+from utils.gpu import (
+    compute_throughput,
+    gpu_memory_allocated,
+    gpu_utilization_percent,
+    reset_peak_mem
+)
 
 
 def run_single_gpu_experiment(conf):
     # TODO: This won't work for multi-GPU setups - diff strats have diff wrappers
-    # We'll likely need to pass the model in as an arg - and also the rank
+    # Likely need to pass the model in as an arg - and also the rank and flags indicating types
     model = SimpleTransformerDecoder(
         conf["vocab_size"],
         conf["d_model"],
@@ -46,9 +56,10 @@ def run_single_gpu_experiment(conf):
     losses = []
     reset_peak_mem()
     t0 = time.perf_counter()
-    warmup = cfg["warmup_steps"]
-    max_steps = cfg["max_steps"]
+    warmup = conf["warmup_steps"]
+    max_steps = conf["max_steps"]
     it = iter(loader)
+    device = "cuda" # TODO: revisit for multi-GPU setup
     for step in range(max_steps):
         try:
             batch = next(it)
@@ -109,3 +120,30 @@ def run_single_gpu_experiment(conf):
     print(f"    cur_mem_mb:        {cur_mem}")
     print(f"    peak_mem_mb:       {peak_mem}")
     print(f"    gpu_util_percent:  {gpu_util}")
+
+    # PROFILER EXAMPLE
+    # TODO: Modify to support multi-GPU setups
+    steps = 8
+    opt = torch.optim.AdamW(model.parameters(), lr=conf["lr"])
+    it = iter(loader)
+    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                 profile_memory=True,
+                 record_shapes=True,
+                 with_stack=False) as prof:
+        for i in range(steps):
+            try:
+                batch = next(it)
+            except StopIteration:
+                it = iter(loader)
+                batch = next(it)
+            batch = batch.to(device, non_blocking=True)
+            opt.zero_grad()
+            # TODO: This captures forward pass - probably want to include loss + backward steps in their own labels
+            with record_function("model_forward"):
+                logits = model(batch)
+            logits = logits[:, :-1, :].contiguous().view(-1, logits.size(-1))
+            targets = batch[:, 1:].contiguous().view(-1)
+            loss = F.cross_entropy(logits, targets)
+            loss.backward()
+            opt.step()
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
