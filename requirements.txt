@@ -1,0 +1,10 @@
+torch==2.8.0 --index-url https://download.pytorch.org/whl/cu124 # nvidia-smi reports CUDA v12.4
+numpy==2.3.3
+nvidia-ml-py==13.580.82  # Useful for high level, "during training" GPU utilization measurements
+#transformers            # When we get into HuggingFace modesl
+#deepspeed               # We'll need this for ZeRO experiments
+#datasets                # Do we want to use real data sets?
+
+# Could be useful for plotting results?
+#matplotlib
+#pandas
