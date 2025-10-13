@@ -1,11 +1,19 @@
 import argparse
+import logging
+import os
 
 import torch
 
 from configs import CONF
 from experiments.single_gpu import run_single_gpu_experiment
 from models.simple import SimpleTransformerDecoder
+from utils.device import get_device
+from utils.logger import get_logger
 
+
+CWD = os.path.dirname(os.path.abspath(__file__))
+LOG_PATH = os.environ.get('LOG_PATH', os.path.join(CWD, "..", "logs"))
+os.path.join
 EXPERIMENT_TYPES = {
     'single_gpu': run_single_gpu_experiment,
 }
@@ -20,16 +28,14 @@ if __name__ == '__main__':
     parser.add_argument('--dry-run', action='store_true', default=False)
     args = parser.parse_args()
 
-    device = "cuda"
-    if args.model_configuration == "cpu":
-        device = "cpu"
-
-    if not torch.cuda.is_available() and device != "cpu":
+    force_cpu = args.model_configuration == 'cpu'
+    if not torch.cuda.is_available() and not force_cpu:
         print("ERROR: CUDA was not detected and you are not running a `cpu` configuration.")
         print("You need to either run the `cpu` configuration or ensure you have CUDA enabled and a GPU available.")
         print("Exiting...")
         exit(1)
 
+    device = get_device(force_cpu=force_cpu)
     conf = CONF[args.model_configuration]
     model = SimpleTransformerDecoder(
         conf["vocab_size"],
@@ -40,9 +46,11 @@ if __name__ == '__main__':
         conf["seq_len"]
     ).to(device)
 
-    print(f"Using configuration: {conf}")
-    print(f"Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
-
-    if not args.dry_run:
+    if args.dry_run:
+        print(f"Using configuration: {conf}")
+        print(f"Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
+    else:
+        logger = get_logger(args.experiment_type, conf, LOG_PATH)
+        logger.info("Starting experiment", extra={"configuration": conf})
         experiment = EXPERIMENT_TYPES[args.experiment_type]
-        experiment(model, conf, device)
+        experiment(model, conf, device, logger)
