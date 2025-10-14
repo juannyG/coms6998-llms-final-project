@@ -85,15 +85,15 @@ def run_single_gpu_experiment(model, conf, device, logger):
         if step % 10 == 0 or step == max_steps - 1:
             logger.info(
                 "Training snapshot",
-                extra={
+                extra={"extra": {
                     "step": f"{step + 1}/{max_steps}",
                     "loss": f"{loss.item():.4f}",
                     "step_time_s": f"{step_time:.4f}",
                     "tokens_per_s": f"{tokens / step_time:,.0f}",
-                    "current_mem_MB": f"{cur_mem:.1f}",
-                    "peak_mem_MB": f"{peak_mem:.1f}",
+                    "current_gpu_mem_MB": f"{cur_mem:.1f}",
+                    "peak_gpu_mem_MB": f"{peak_mem:.1f}",
                     "gpu_util_percent": gpu_util,
-                },
+                }},
             )
 
     total_time = time.perf_counter() - t0
@@ -108,14 +108,16 @@ def run_single_gpu_experiment(model, conf, device, logger):
     logger.info(
         "Training results",
         extra={
-            "avg_tokens_per_s": avg_tokens_per_s,
-            "avg_samples_per_s": avg_samples_per_s,
-            "avg_loss": avg_loss,
-            "total_tokens": total_tokens,
-            "total_time_s": total_time,
-            "cur_mem_mb": cur_mem,
-            "peak_mem_mb": peak_mem,
-            "gpu_util_percent": gpu_util,
+            "extra": {
+                "avg_tokens_per_s": avg_tokens_per_s,
+                "avg_samples_per_s": avg_samples_per_s,
+                "avg_loss": avg_loss,
+                "total_tokens": total_tokens,
+                "total_time_s": total_time,
+                "cur_gpu_mem_mb": cur_mem,
+                "peak_gpu_mem_mb": peak_mem,
+                "gpu_util_percent": gpu_util,
+            }
         },
     )
 
@@ -144,8 +146,23 @@ def run_single_gpu_experiment(model, conf, device, logger):
             loss = F.cross_entropy(logits, targets)
             loss.backward()
             optimizer.step()
-    x = prof.key_averages()
-    for xx in x:
-        print(xx)
-        print(vars(xx))
-    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
+
+    profiler_metrics = {
+        "profiler_metrics": [
+            {
+                "operation": k.key,
+                "count": k.count,
+                "cpu_memory_usage": k.cpu_memory_usage,
+                "cpu_time_total": k.cpu_time_total,
+                "device_memory_usage": k.device_memory_usage,
+                "device_time_total": k.device_time_total,
+                "device_type": str(k.device_type),
+                "self_cpu_memory_usage": k.self_cpu_memory_usage,
+                "self_cpu_time_total": k.self_cpu_time_total,
+                "self_device_time_total": k.self_device_time_total,
+                "self_device_memory_usage": k.self_device_memory_usage,
+            }
+            for k in prof.key_averages()
+        ]
+    }
+    logger.info("Profiler metrics", extra={"extra": profiler_metrics})

@@ -9,6 +9,7 @@ def _get_device_str():
     d = get_device()
     return f'{d.type}_{d.index if d.index else 0}'
 
+
 class JsonlFormatter(logging.Formatter):
     def format(self, record):
         log_record = {
@@ -20,6 +21,7 @@ class JsonlFormatter(logging.Formatter):
         if hasattr(record, "extra"):
             log_record.update(record.extra)
         return json.dumps(log_record)
+
 
 def get_logger(exp_type, model_conf, log_path, level=logging.INFO):
     log_f = f'{log_path}/run_{int(time.time())}_{exp_type}_{model_conf}_{_get_device_str()}.log'
