@@ -2,7 +2,6 @@ __all__ = [
     'gpu_memory_allocated',
     'reset_peak_mem',
     'gpu_utilization_percent',
-    'compute_throughput'
 ]
 
 import torch
@@ -39,6 +38,3 @@ def gpu_utilization_percent():
         util = pynvml.nvmlDeviceGetUtilizationRates(handle)
         return util.gpu
     return 0
-
-def compute_throughput(tokens_processed, seconds):
-    return tokens_processed / seconds if seconds > 0 else 0.0

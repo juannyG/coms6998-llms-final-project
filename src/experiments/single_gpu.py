@@ -8,7 +8,6 @@ from torch.profiler import profile, record_function, ProfilerActivity
 
 from datasets.synthetic import SyntheticDataset
 from utils.gpu import (
-    compute_throughput,
     gpu_memory_allocated,
     gpu_utilization_percent,
     reset_peak_mem,
