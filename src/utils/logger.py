@@ -1,3 +1,4 @@
+import os
 import json
 import logging
 import time
@@ -7,7 +8,7 @@ from utils.device import get_device
 
 def _get_device_str():
     d = get_device()
-    return f'{d.type}_{d.index if d.index else 0}'
+    return f'{d.type}_{d.index if d.index else os.getpid()}'
 
 
 class JsonlFormatter(logging.Formatter):

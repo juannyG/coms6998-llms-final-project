@@ -4,8 +4,7 @@ Citation:
 * https://docs.pytorch.org/tutorials/beginner/ddp_series_fault_tolerance.html
 * https://github.com/pytorch/examples/blob/main/distributed/ddp-tutorial-series/multigpu.py
 
-
-torchrun --standalone --nproc_per_node=2 run_experiment torch_ddp <CONF_KEY>
+torchrun --standalone --nproc_per_node=2 run_experiment.py torch_ddp <CONF_KEY>
 """
 
 import os
@@ -29,28 +28,31 @@ from utils.gpu import (
 
 
 def run_torch_ddp_experiment(model, conf, device, logger):
-    try:
-        # See: https://docs.pytorch.org/tutorials/intermediate/ddp_tutorial.html#initialize-ddp-with-torch-distributed-run-torchrun
+    # See: https://docs.pytorch.org/tutorials/intermediate/ddp_tutorial.html#initialize-ddp-with-torch-distributed-run-torchrun
+    # create model and move it to GPU with id rank
+    model = model.to(device)
+    if device.type.startswith("cuda"):
         dist.init_process_group(backend="nccl")
-        torch.cuda.set_device(int(os.environ.get("LOCAL_RANK", 0)))
-
-        ## create model and move it to GPU with id rank
-        # device_id = rank % torch.accelerator.device_count()
-        model = model.to(device)
-
+        torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
         ddp_model = DDP(model, device_ids=[device])
+    else:
+        dist.init_process_group(backend="gloo")
+        ddp_model = DDP(model)
+
+    try:
         dataset = SyntheticDataset(
             n_samples=10000, seq_len=conf["seq_len"], vocab_size=conf["vocab_size"]
         )
-        # TODO: This won't work for multi-GPU strats, we need to include a "sampler"
+        sampler = DistributedSampler(dataset)
         loader = DataLoader(
             dataset,
             batch_size=conf["batch_size"],
-            shuffle=True, # TODO: Copied from sngle_gpu - why doesn't the tutorial shuffle?
+            shuffle=False, # DistributedSampler is mutually exclusive from shuffle
             num_workers=2,
             pin_memory=True,
-            sampler=DistributedSampler(dataset),
+            sampler=sampler
         )
+        sampler.set_epoch(0)
 
         optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=conf["lr"])
         criterion = nn.CrossEntropyLoss()
@@ -167,9 +169,12 @@ def run_torch_ddp_experiment(model, conf, device, logger):
                     logits = ddp_model(batch)
                 logits = logits[:, :-1, :].contiguous().view(-1, logits.size(-1))
                 targets = batch[:, 1:].contiguous().view(-1)
-                loss = F.cross_entropy(logits, targets)
-                loss.backward()
-                optimizer.step()
+                with record_function("model_loss"):
+                    loss = F.cross_entropy(logits, targets)
+                with record_function("model_backward"):
+                    loss.backward()
+                with record_function("model_optimizer_step"):
+                    optimizer.step()
 
         profiler_metrics = {
             "profiler_metrics": [
@@ -190,5 +195,8 @@ def run_torch_ddp_experiment(model, conf, device, logger):
             ]
         }
         logger.info("Profiler metrics", extra={"extra": profiler_metrics})
+
+        if device.type == "cpu":
+            print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
     finally:
         dist.destroy_process_group()
