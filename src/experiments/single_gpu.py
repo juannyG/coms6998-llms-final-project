@@ -1,3 +1,7 @@
+"""
+python run_experiment single_gpu <CONF_KEY>
+"""
+
 import time
 
 import torch
@@ -84,15 +88,17 @@ def run_single_gpu_experiment(model, conf, device, logger):
         if step % 10 == 0 or step == max_steps - 1:
             logger.info(
                 "Training snapshot",
-                extra={"extra": {
-                    "step": f"{step + 1}/{max_steps}",
-                    "loss": f"{loss.item():.4f}",
-                    "step_time_s": f"{step_time:.4f}",
-                    "tokens_per_s": f"{tokens / step_time:,.0f}",
-                    "current_gpu_mem_MB": f"{cur_mem:.1f}",
-                    "peak_gpu_mem_MB": f"{peak_mem:.1f}",
-                    "gpu_util_percent": gpu_util,
-                }},
+                extra={
+                    "extra": {
+                        "step": f"{step + 1}/{max_steps}",
+                        "loss": f"{loss.item():.4f}",
+                        "step_time_s": f"{step_time:.4f}",
+                        "tokens_per_s": f"{tokens / step_time:,.0f}",
+                        "current_gpu_mem_MB": f"{cur_mem:.1f}",
+                        "peak_gpu_mem_MB": f"{peak_mem:.1f}",
+                        "gpu_util_percent": gpu_util,
+                    }
+                },
             )
 
     total_time = time.perf_counter() - t0

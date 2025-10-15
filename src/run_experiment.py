@@ -1,8 +1,4 @@
-"""
-python run_experiment single_gpu <CONF_KEY>
-"""
 import argparse
-import logging
 import os
 
 import torch
