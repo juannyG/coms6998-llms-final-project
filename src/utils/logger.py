@@ -8,7 +8,7 @@ from utils.device import get_device
 
 def _get_device_str():
     d = get_device()
-    return f'{d.type}_{d.index if d.index else os.getpid()}'
+    return f'{d.type}_{d.index if d.index is not None else os.getpid()}'
 
 
 class JsonlFormatter(logging.Formatter):
