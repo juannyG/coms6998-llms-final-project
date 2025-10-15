@@ -148,7 +148,6 @@ def run_torch_ddp_experiment(model, conf, device, logger):
         )
 
         # PROFILER EXAMPLE
-        # TODO: Modify to support multi-GPU setups
         steps = 8
         with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
@@ -164,11 +163,13 @@ def run_torch_ddp_experiment(model, conf, device, logger):
                     batch = next(it)
                 batch = batch.to(device, non_blocking=True)
                 optimizer.zero_grad()
-                # TODO: This captures forward pass - probably want to include loss + backward steps in their own labels
+
                 with record_function("model_forward"):
                     logits = ddp_model(batch)
+
                 logits = logits[:, :-1, :].contiguous().view(-1, logits.size(-1))
                 targets = batch[:, 1:].contiguous().view(-1)
+
                 with record_function("model_loss"):
                     loss = F.cross_entropy(logits, targets)
                 with record_function("model_backward"):
