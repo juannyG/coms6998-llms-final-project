@@ -1,3 +1,6 @@
+"""
+python run_experiment single_gpu <CONF_KEY>
+"""
 import argparse
 import logging
 import os
@@ -5,7 +8,7 @@ import os
 import torch
 
 from configs import CONF
-from experiments.single_gpu import run_single_gpu_experiment
+from experiments import single_gpu, torch_ddp
 from models.simple import SimpleTransformerDecoder
 from utils.device import get_device
 from utils.logger import get_logger
@@ -15,7 +18,8 @@ CWD = os.path.dirname(os.path.abspath(__file__))
 LOG_PATH = os.environ.get("LOG_PATH", os.path.join(CWD, "..", "logs"))
 os.path.join
 EXPERIMENT_TYPES = {
-    "single_gpu": run_single_gpu_experiment,
+    "single_gpu": single_gpu.run_single_gpu_experiment,
+    "torch_ddp": torch_ddp.run_torch_ddp_experiment
 }
 
 
