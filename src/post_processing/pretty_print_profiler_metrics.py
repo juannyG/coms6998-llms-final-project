@@ -52,7 +52,6 @@ def main():
     if not all_files:
         raise FileNotFoundError(f"No JSONL files found in {args.log_file if args.log_file else args.log_dir}")
 
-    all_data = []
     for fpath in all_files:
         rank = Path(fpath).stem
         metrics = load_profiler_metrics(fpath)
