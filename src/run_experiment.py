@@ -50,16 +50,17 @@ if __name__ == "__main__":
         conf["seq_len"],
     ).to(device)
 
+    num_param = sum(p.numel() for p in model.parameters() if p.requires_grad)
     if args.dry_run:
         print(f"Using configuration: {conf}")
         print(
-            f"Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}"
+            f"Trainable parameters: {num_param}"
         )
     else:
         logger = get_logger(args.experiment_type, args.model_configuration, LOG_PATH)
         logger.info(
             "Starting experiment",
-            extra={"extra": {"configuration": {k: str(v) for k, v in conf.items()}}},
+            extra={"extra": {"configuration": {k: str(v) for k, v in conf.items()}, "num_param": num_param}},
         )
         experiment = EXPERIMENT_TYPES[args.experiment_type]
         experiment(model, conf, device, logger)

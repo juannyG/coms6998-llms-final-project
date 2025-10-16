@@ -9,6 +9,7 @@ torchrun --standalone --nproc_per_node=2 run_experiment.py torch_ddp <CONF_KEY>
 
 import os
 import time
+import datetime
 
 import torch
 import torch.nn as nn
@@ -30,13 +31,15 @@ from utils.gpu import (
 def run_torch_ddp_experiment(model, conf, device, logger):
     # See: https://docs.pytorch.org/tutorials/intermediate/ddp_tutorial.html#initialize-ddp-with-torch-distributed-run-torchrun
     # create model and move it to GPU with id rank
-    model = model.to(device)
+    ddp_model = None
     if device.type.startswith("cuda"):
-        dist.init_process_group(backend="nccl")
-        torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
-        ddp_model = DDP(model, device_ids=[device])
+        dist.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=60))
+        torch.cuda.set_device(device)
+        model = model.to(device)
+        ddp_model = DDP(model, device_ids=[device.index])
     else:
         dist.init_process_group(backend="gloo")
+        model = model.to(device)
         ddp_model = DDP(model)
 
     try:

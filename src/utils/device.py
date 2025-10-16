@@ -23,5 +23,3 @@ def get_device(force_cpu=False):
     d = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
     set_device_context(d)
     return d
-
-
