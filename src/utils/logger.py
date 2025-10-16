@@ -25,7 +25,7 @@ class JsonlFormatter(logging.Formatter):
 
 
 def get_logger(exp_type, model_conf, log_path, level=logging.INFO):
-    log_f = f'{log_path}/run_{int(time.time())}_{exp_type}_{model_conf}_{_get_device_str()}.log'
+    log_f = f'{log_path}/run_{exp_type}_{model_conf}_{_get_device_str()}_{int(time.time())}.log'
 
     logger = logging.getLogger(log_f)
     logger.setLevel(level)
