@@ -143,14 +143,20 @@ def run_single_gpu_experiment(model, conf, device, logger):
                 batch = next(it)
             batch = batch.to(device, non_blocking=True)
             optimizer.zero_grad()
-            # TODO: This captures forward pass - probably want to include loss + backward steps in their own labels
+
             with record_function("model_forward"):
                 logits = model(batch)
+
             logits = logits[:, :-1, :].contiguous().view(-1, logits.size(-1))
             targets = batch[:, 1:].contiguous().view(-1)
-            loss = F.cross_entropy(logits, targets)
-            loss.backward()
-            optimizer.step()
+
+            with record_function("model_loss"):
+                loss = F.cross_entropy(logits, targets)
+
+            with record_function("model_backward"):
+                loss.backward()
+            with record_function("model_optimizer_step"):
+                optimizer.step()
 
     profiler_metrics = {
         "profiler_metrics": [
