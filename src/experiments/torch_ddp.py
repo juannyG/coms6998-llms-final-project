@@ -191,7 +191,7 @@ def run_torch_ddp_experiment(model, conf, device, logger):
                     "cpu_time_total": k.cpu_time_total,
                     "device_memory_usage": k.device_memory_usage,
                     "device_time_total": k.device_time_total,
-                    "device_type": "CUDA" if k.device_time_total > 0 else "CPU",
+                    "device_type": str(k.device_type),
                     "self_cpu_memory_usage": k.self_cpu_memory_usage,
                     "self_cpu_time_total": k.self_cpu_time_total,
                     "self_device_time_total": k.self_device_time_total,
