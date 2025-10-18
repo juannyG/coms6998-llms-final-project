@@ -1,11 +1,11 @@
 """
-This is a simple script meant to take a log file or an entire directory 
-
+This is a simple script meant to take a log file or an entire directory and produce
+summaries of different type of measurements from our experiments.
 
 Usage:
-    python post_processing/summarize_metrics.py training_results --log-dir ../logs/
+    python post_processing/summarize_metrics.py training --dir ../logs/
 
-    python post_processing/summarize_metrics.py profiler_metrics --log-files ../logs/run_single_gpu_10m_cuda_0.log
+    python post_processing/summarize_metrics.py profiler --files ../logs/run_single_gpu_10m*
 """
 
 import argparse
@@ -14,14 +14,30 @@ import glob
 from pathlib import Path
 
 from tabulate import tabulate
-from torch.cuda import device_memory_used
 
-TRAINING_RESULTS_METRIC_TYPE = 'training'
-PROFILER_METRICS_TYPE = 'profiler'
+
+TRAINING_RESULTS_METRIC_TYPE = "training"
+PROFILER_METRICS_TYPE = "profiler"
 METRICS_MESSAGE_MAP = {
     # TODO: The values feels fragile - we can probably tighten up the structural connection with the JSONL log files...
     TRAINING_RESULTS_METRIC_TYPE: "Training results",
-    PROFILER_METRICS_TYPE: "Profiler metrics"
+    PROFILER_METRICS_TYPE: "Profiler metrics",
+}
+
+EXPERIMENT_PROFILER_OPERATION_LABELS = {
+    """
+    This provides a mapping of what profiler labels should be included the in the profiler summary
+    based on the type of experiment. For example: ddp_communication is not recorded nor does it make 
+    sense to include in the `single_gpu` experiment summary
+    """
+    # TODO: Move the label definitions into the experiments and pull them in here
+    "single_gpu": [
+        "model_forward",
+        "model_loss",
+        "model_backward",
+        "model_optimizer_step",
+    ],
+    "ddp": ["model_forward", "model_loss", "model_backward", 'ddp_communication', "model_optimizer_step"],
 }
 
 
@@ -34,14 +50,12 @@ def format_training_results(result):
         ["Total Tokens", f"{result['total_tokens']:,}"],
         ["Total Time", f"{result['total_time_s']:.2f} sec"],
         ["Peak GPU Mem", f"{result['peak_gpu_mem_mb']:.1f} MB"],
-        ["GPU Utilization", f"{result['gpu_util_percent']}%"]
+        ["GPU Utilization", f"{result['gpu_util_percent']}%"],
     ]
     return tabulate(table, headers=["Metric", "Value"], tablefmt="github")
 
 
-def format_profile_metrics(results):
-    # We need to massage this a bit first...see experiments for labels
-    operation_labels = ['model_forward', 'model_loss', 'model_backward', 'ddp_communication', 'model_optimizer_step']
+def format_profile_metrics(results, operation_labels):
     operation_metrics = {
         op_label: {
             "calls": 0,
@@ -49,32 +63,59 @@ def format_profile_metrics(results):
             "gpu_time_ms": 0.0,
             "cpu_mem_mb": 0.0,
             "gpu_mem_mb": 0.0,
-        } for op_label in operation_labels
+        }
+        for op_label in operation_labels
     }
 
-    for r in results['profiler_metrics']:
-        if r.get('operation') in operation_labels:
-            op_label = r['operation']
-            d_type = r['device_type']
-            operation_metrics[op_label]['calls'] = r['count']
+    for r in results["profiler_metrics"]:
+        if r.get("operation") in operation_labels:
+            op_label = r["operation"]
+            d_type = r["device_type"]
+            operation_metrics[op_label]["calls"] = r["count"]
 
-            if d_type == 'DeviceType.CPU':
-                operation_metrics[op_label]['cpu_time_ms'] += r['cpu_time_total'] / 1000
-                operation_metrics[op_label]['cpu_mem_mb'] += r['cpu_memory_usage'] / (1024**2)
+            if d_type == "DeviceType.CPU":
+                operation_metrics[op_label]["cpu_time_ms"] += r["cpu_time_total"] / 1000
+                operation_metrics[op_label]["cpu_mem_mb"] += r["cpu_memory_usage"] / (
+                    1024**2
+                )
 
                 # Super weird - but, it appears pytorch profiling puts the meaningful GPU info in the device type CPU records
-                operation_metrics[op_label]['gpu_time_ms'] += r['device_time_total'] / 1000
-                operation_metrics[op_label]['gpu_mem_mb'] += max(r['device_memory_usage'], 0) / (1024**2)
+                operation_metrics[op_label]["gpu_time_ms"] += (
+                    r["device_time_total"] / 1000
+                )
+                operation_metrics[op_label]["gpu_mem_mb"] += max(
+                    r["device_memory_usage"], 0
+                ) / (1024**2)
 
-            elif d_type == 'DeviceType.CUDA':
+            elif d_type == "DeviceType.CUDA":
                 # Use only "self" time; total time was already counted in CPU block (see above comment)
-                operation_metrics[op_label]['gpu_time_ms'] += r['self_device_time_total'] / 1000
+                operation_metrics[op_label]["gpu_time_ms"] += (
+                    r["self_device_time_total"] / 1000
+                )
 
     table = [
-        [op_label, metric["calls"], f"{metric['cpu_time_ms']:.2f}", f"{metric['gpu_time_ms']:.2f}", f"{metric['cpu_mem_mb']:.2f}", f"{metric['gpu_mem_mb']:.2f}"]
+        [
+            op_label,
+            metric["calls"],
+            f"{metric['cpu_time_ms']:.2f}",
+            f"{metric['gpu_time_ms']:.2f}",
+            f"{metric['cpu_mem_mb']:.2f}",
+            f"{metric['gpu_mem_mb']:.2f}",
+        ]
         for op_label, metric in operation_metrics.items()
     ]
-    return tabulate(table, headers=["Operation", "Calls", "CPU Time (ms)", "GPU Time (ms)", "CPU Memory (MB)", "GPU Memory (MB)"], tablefmt="github")
+    return tabulate(
+        table,
+        headers=[
+            "Operation",
+            "Calls",
+            "CPU Time (ms)",
+            "GPU Time (ms)",
+            "CPU Memory (MB)",
+            "GPU Memory (MB)",
+        ],
+        tablefmt="github",
+    )
 
 
 def get_metrics(file_path, metric_msg):
@@ -82,7 +123,7 @@ def get_metrics(file_path, metric_msg):
         for line in f:
             try:
                 obj = json.loads(line)
-                if obj.get('message') == metric_msg:
+                if obj.get("message") == metric_msg:
                     return obj
             except json.JSONDecodeError:
                 print("failed to load json")
@@ -91,25 +132,41 @@ def get_metrics(file_path, metric_msg):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Provide per-device metrics summary in a more concise and readable manner.")
-    parser.add_argument('metric_type', type=str, choices=list(METRICS_MESSAGE_MAP.keys()), help="The type of metric to extract and summarize.")
-    parser.add_argument("--log-files", nargs="+", required=False, help="Specific JSONL files.")
-    parser.add_argument("--log-dir", type=str, required=False, help="Directory containing rank JSONL files.")
+    parser = argparse.ArgumentParser(
+        description="Provide per-device metrics summary in a more concise and readable manner."
+    )
+    parser.add_argument(
+        "summary_type",
+        type=str,
+        choices=list(METRICS_MESSAGE_MAP.keys()),
+        help="The type of metric to extract and summarize.",
+    )
+    parser.add_argument(
+        "--files",
+        type=str,
+        required=False,
+        help="JSONL file glob (specific file or path/to/logs*",
+    )
+    parser.add_argument(
+        "--dir", type=str, required=False, help="Directory containing rank JSONL files."
+    )
     args = parser.parse_args()
 
     if not args.log_files and not args.log_dir:
-        print("ERROR: You must specify either --log-files or --log-dir")
+        print("ERROR: You must specify either --files or --dir")
         parser.print_help()
         exit(1)
 
     # Load the log file(s)
     all_files = []
-    if args.log_dir:
-        all_files.extend(sorted(glob.glob(f"{args.log_dir}/*.log")))
-    for f in (args.log_files or []):
-        all_files.extend(sorted(glob.glob(f"{f}")))
+    if args.dir:
+        all_files.extend(sorted(glob.glob(f"{args.dir}/*.log")))
+    if args.files:
+        all_files.extend(sorted(glob.glob(f"{args.files}")))
     if not all_files:
-        raise FileNotFoundError(f"No JSONL files found in {args.log_files} / {args.log_dir}")
+        raise FileNotFoundError(
+            f"No JSONL files found in files: {args.files} / dir: {args.dir}"
+        )
 
     # Print summary tables for experiment type
     for fpath in all_files:
@@ -123,7 +180,12 @@ def main():
         if args.metric_type == TRAINING_RESULTS_METRIC_TYPE:
             print(format_training_results(metrics))
         elif args.metric_type == PROFILER_METRICS_TYPE:
-            print(format_profile_metrics(metrics))
+            operation_labels = []
+            if "single_gpu" in experiment:
+                operation_labels = EXPERIMENT_PROFILER_OPERATION_LABELS["single_gpu"]
+            elif "ddp" in experiment:
+                operation_labels = EXPERIMENT_PROFILER_OPERATION_LABELS["ddp"]
+            print(format_profile_metrics(metrics, operation_labels))
 
 
 if __name__ == "__main__":
