@@ -38,7 +38,13 @@ EXPERIMENT_PROFILER_OPERATION_LABELS = {
         "model_backward",
         "model_optimizer_step",
     ],
-    "ddp": ["model_forward", "model_loss", "model_backward", 'ddp_communication', "model_optimizer_step"],
+    "ddp": [
+        "model_forward",
+        "model_loss",
+        "model_backward",
+        "ddp_communication",
+        "model_optimizer_step",
+    ],
 }
 
 
@@ -142,7 +148,7 @@ def main():
         choices=list(METRICS_MESSAGE_MAP.keys()),
         help="The type of metric to extract and summarize.",
     )
-    parser.add_argument('--files', nargs='*', default=[], help='List of files')
+    parser.add_argument("--files", nargs="*", default=[], help="List of files")
     parser.add_argument(
         "--dir", type=str, required=False, help="Directory containing rank JSONL files."
     )
