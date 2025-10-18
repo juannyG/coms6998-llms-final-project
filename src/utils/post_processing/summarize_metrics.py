@@ -16,8 +16,8 @@ from pathlib import Path
 from tabulate import tabulate
 from torch.cuda import device_memory_used
 
-TRAINING_RESULTS_METRIC_TYPE = 'training_results'
-PROFILER_METRICS_TYPE = 'profiler_metrics'
+TRAINING_RESULTS_METRIC_TYPE = 'training'
+PROFILER_METRICS_TYPE = 'profiler'
 METRICS_MESSAGE_MAP = {
     # TODO: The values feels fragile - we can probably tighten up the structural connection with the JSONL log files...
     TRAINING_RESULTS_METRIC_TYPE: "Training results",
@@ -45,24 +45,36 @@ def format_profile_metrics(results):
     operation_metrics = {
         op_label: {
             "calls": 0,
-            "device_time_ms": 0.0,
-            "device_mem_mb": 0.0,
+            "cpu_time_ms": 0.0,
+            "gpu_time_ms": 0.0,
+            "cpu_mem_mb": 0.0,
+            "gpu_mem_mb": 0.0,
         } for op_label in operation_labels
     }
 
-    print(results)
     for r in results['profiler_metrics']:
         if r.get('operation') in operation_labels:
             op_label = r['operation']
+            d_type = r['device_type']
             operation_metrics[op_label]['calls'] = r['count']
-            operation_metrics[op_label]['device_time_ms'] = r['device_time_total'] / 1000
-            operation_metrics[op_label]['device_mem_mb'] = r['device_memory_usage'] / (1024**2)
+
+            if d_type == 'DeviceType.CPU':
+                operation_metrics[op_label]['cpu_time_ms'] += r['cpu_time_total'] / 1000
+                operation_metrics[op_label]['cpu_mem_mb'] += r['cpu_memory_usage'] / (1024**2)
+
+                # Super weird - but, it appears pytorch profiling puts the meaningful GPU info in the device type CPU records
+                operation_metrics[op_label]['gpu_time_ms'] += r['device_time_total'] / 1000
+                operation_metrics[op_label]['gpu_mem_mb'] += max(r['device_memory_usage'], 0) / (1024**2)
+
+            elif d_type == 'DeviceType.CUDA':
+                # Use only "self" time; total time was already counted in CPU block (see above comment)
+                operation_metrics[op_label]['gpu_time_ms'] += r['self_device_time_total'] / 1000
 
     table = [
-        [op_label, metric["calls"], f"{metric['device_time_ms']:.2f}", f"{metric['device_mem_mb']:.2f}"]
+        [op_label, metric["calls"], f"{metric['cpu_time_ms']:.2f}", f"{metric['gpu_time_ms']:.2f}", f"{metric['cpu_mem_mb']:.2f}", f"{metric['gpu_mem_mb']:.2f}"]
         for op_label, metric in operation_metrics.items()
     ]
-    return tabulate(table, headers=["Operation", "Calls", "Time (ms)", "Memory (MB)"], tablefmt="github")
+    return tabulate(table, headers=["Operation", "Calls", "CPU Time (ms)", "GPU Time (ms)", "CPU Memory (MB)", "GPU Memory (MB)"], tablefmt="github")
 
 
 def get_metrics(file_path, metric_msg):
@@ -81,7 +93,7 @@ def get_metrics(file_path, metric_msg):
 def main():
     parser = argparse.ArgumentParser(description="Provide per-device metrics summary in a more concise and readable manner.")
     parser.add_argument('metric_type', type=str, choices=list(METRICS_MESSAGE_MAP.keys()), help="The type of metric to extract and summarize.")
-    parser.add_argument("--log-files", nargs="+", required=False, help="Specific JSONL file.")
+    parser.add_argument("--log-files", nargs="+", required=False, help="Specific JSONL files.")
     parser.add_argument("--log-dir", type=str, required=False, help="Directory containing rank JSONL files.")
     args = parser.parse_args()
 
@@ -94,10 +106,10 @@ def main():
     all_files = []
     if args.log_dir:
         all_files.extend(sorted(glob.glob(f"{args.log_dir}/*.log")))
-    for f in args.log_files:
+    for f in (args.log_files or []):
         all_files.extend(sorted(glob.glob(f"{f}")))
     if not all_files:
-        raise FileNotFoundError(f"No JSONL files found in {args.log_file if args.log_file else args.log_dir}")
+        raise FileNotFoundError(f"No JSONL files found in {args.log_files} / {args.log_dir}")
 
     # Print summary tables for experiment type
     for fpath in all_files:
