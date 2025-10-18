@@ -24,12 +24,13 @@ METRICS_MESSAGE_MAP = {
     PROFILER_METRICS_TYPE: "Profiler metrics",
 }
 
+
+"""
+This provides a mapping of what profiler labels should be included the in the profiler summary
+based on the type of experiment. For example: ddp_communication is not recorded nor does it make 
+sense to include in the `single_gpu` experiment summary
+"""
 EXPERIMENT_PROFILER_OPERATION_LABELS = {
-    """
-    This provides a mapping of what profiler labels should be included the in the profiler summary
-    based on the type of experiment. For example: ddp_communication is not recorded nor does it make 
-    sense to include in the `single_gpu` experiment summary
-    """
     # TODO: Move the label definitions into the experiments and pull them in here
     "single_gpu": [
         "model_forward",
@@ -136,23 +137,18 @@ def main():
         description="Provide per-device metrics summary in a more concise and readable manner."
     )
     parser.add_argument(
-        "summary_type",
+        "metric_type",
         type=str,
         choices=list(METRICS_MESSAGE_MAP.keys()),
         help="The type of metric to extract and summarize.",
     )
-    parser.add_argument(
-        "--files",
-        type=str,
-        required=False,
-        help="JSONL file glob (specific file or path/to/logs*",
-    )
+    parser.add_argument('--files', nargs='*', default=[], help='List of files')
     parser.add_argument(
         "--dir", type=str, required=False, help="Directory containing rank JSONL files."
     )
     args = parser.parse_args()
 
-    if not args.log_files and not args.log_dir:
+    if not args.files and not args.dir:
         print("ERROR: You must specify either --files or --dir")
         parser.print_help()
         exit(1)
@@ -161,8 +157,8 @@ def main():
     all_files = []
     if args.dir:
         all_files.extend(sorted(glob.glob(f"{args.dir}/*.log")))
-    if args.files:
-        all_files.extend(sorted(glob.glob(f"{args.files}")))
+    for f in args.files:
+        all_files.extend(sorted(glob.glob(f"{f}")))
     if not all_files:
         raise FileNotFoundError(
             f"No JSONL files found in files: {args.files} / dir: {args.dir}"
