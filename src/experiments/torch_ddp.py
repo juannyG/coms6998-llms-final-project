@@ -192,7 +192,7 @@ def run_torch_ddp_experiment(model, conf, device, logger):
                     loss = F.cross_entropy(logits, targets)
                 with record_function(MODEL_BACKWARD_PROFILER_LABEL):
                     with record_function(MODEL_DDP_PROFILER_LABEL):
-                        # Specifically track a label for all_gather comms in DDP
+                        # Specifically track a label for all-reduce comms in DDP
                         loss.backward()
                 with record_function(MODEL_OPTIMIZER_PROFILER_LABEL):
                     optimizer.step()
