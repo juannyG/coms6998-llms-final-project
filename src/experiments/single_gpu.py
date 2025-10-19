@@ -17,14 +17,22 @@ from utils.gpu import (
     reset_peak_mem,
 )
 
+MODEL_FORWARD_PROFILER_LABEL = "model_forward"
+MODEL_LOSS_PROFILER_LABEL = "model_loss"
+MODEL_BACKWARD_PROFILER_LABEL = "model_backward"
+MODEL_OPTIMIZER_PROFILER_LABEL = "model_optimizer_step"
+EXPERIMENT_PROFILER_LABELS = [
+    MODEL_FORWARD_PROFILER_LABEL,
+    MODEL_LOSS_PROFILER_LABEL,
+    MODEL_BACKWARD_PROFILER_LABEL,
+    MODEL_OPTIMIZER_PROFILER_LABEL,
+]
+
 
 def run_single_gpu_experiment(model, conf, device, logger):
-    # TODO: This won't work for multi-GPU setups - diff strats have diff wrappers
-    # Things like the rank and flags indicating types of experiment will likely be necessary
     dataset = SyntheticDataset(
         n_samples=10000, seq_len=conf["seq_len"], vocab_size=conf["vocab_size"]
     )
-    # TODO: This won't work for multi-GPU strats, we need to include a "sampler"
     loader = DataLoader(
         dataset,
         batch_size=conf["batch_size"],
@@ -127,7 +135,6 @@ def run_single_gpu_experiment(model, conf, device, logger):
     )
 
     # PROFILER EXAMPLE
-    # TODO: Modify to support multi-GPU setups
     steps = 8
     with profile(
         activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
@@ -144,18 +151,18 @@ def run_single_gpu_experiment(model, conf, device, logger):
             batch = batch.to(device, non_blocking=True)
             optimizer.zero_grad()
 
-            with record_function("model_forward"):
+            with record_function(MODEL_FORWARD_PROFILER_LABEL):
                 logits = model(batch)
 
             logits = logits[:, :-1, :].contiguous().view(-1, logits.size(-1))
             targets = batch[:, 1:].contiguous().view(-1)
 
-            with record_function("model_loss"):
+            with record_function(MODEL_LOSS_PROFILER_LABEL):
                 loss = F.cross_entropy(logits, targets)
 
-            with record_function("model_backward"):
+            with record_function(MODEL_BACKWARD_PROFILER_LABEL):
                 loss.backward()
-            with record_function("model_optimizer_step"):
+            with record_function(MODEL_OPTIMIZER_PROFILER_LABEL):
                 optimizer.step()
 
     profiler_metrics = {

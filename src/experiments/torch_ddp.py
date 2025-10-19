@@ -27,6 +27,19 @@ from utils.gpu import (
     reset_peak_mem,
 )
 
+MODEL_FORWARD_PROFILER_LABEL = "model_forward"
+MODEL_LOSS_PROFILER_LABEL = "model_loss"
+MODEL_BACKWARD_PROFILER_LABEL = "model_backward"
+MODEL_DDP_PROFILER_LABEL = "ddp_communication"
+MODEL_OPTIMIZER_PROFILER_LABEL = "model_optimizer_step"
+EXPERIMENT_PROFILER_LABELS = [
+    MODEL_FORWARD_PROFILER_LABEL,
+    MODEL_LOSS_PROFILER_LABEL,
+    MODEL_BACKWARD_PROFILER_LABEL,
+    MODEL_DDP_PROFILER_LABEL,
+    MODEL_OPTIMIZER_PROFILER_LABEL,
+]
+
 
 def run_torch_ddp_experiment(model, conf, device, logger):
     # See: https://docs.pytorch.org/tutorials/intermediate/ddp_tutorial.html#initialize-ddp-with-torch-distributed-run-torchrun
@@ -50,10 +63,10 @@ def run_torch_ddp_experiment(model, conf, device, logger):
         loader = DataLoader(
             dataset,
             batch_size=conf["batch_size"],
-            shuffle=False, # DistributedSampler is mutually exclusive from shuffle
+            shuffle=False,  # DistributedSampler is mutually exclusive from shuffle
             num_workers=2,
             pin_memory=True,
-            sampler=sampler
+            sampler=sampler,
         )
         sampler.set_epoch(0)
 
@@ -130,7 +143,9 @@ def run_torch_ddp_experiment(model, conf, device, logger):
             sum(token_throughputs) / len(token_throughputs) if token_throughputs else 0
         )
         avg_samples_per_s = (
-            sum(sample_throughputs) / len(sample_throughputs) if sample_throughputs else 0
+            sum(sample_throughputs) / len(sample_throughputs)
+            if sample_throughputs
+            else 0
         )
         avg_loss = sum(losses) / len(losses) if losses else None
 
@@ -167,19 +182,19 @@ def run_torch_ddp_experiment(model, conf, device, logger):
                 batch = batch.to(device, non_blocking=True)
                 optimizer.zero_grad()
 
-                with record_function("model_forward"):
+                with record_function(MODEL_FORWARD_PROFILER_LABEL):
                     logits = ddp_model(batch)
 
                 logits = logits[:, :-1, :].contiguous().view(-1, logits.size(-1))
                 targets = batch[:, 1:].contiguous().view(-1)
 
-                with record_function("model_loss"):
+                with record_function(MODEL_LOSS_PROFILER_LABEL):
                     loss = F.cross_entropy(logits, targets)
-                with record_function("model_backward"):
-                    with record_function("ddp_communication"):
+                with record_function(MODEL_BACKWARD_PROFILER_LABEL):
+                    with record_function(MODEL_DDP_PROFILER_LABEL):
                         # Specifically track a label for all_gather comms in DDP
                         loss.backward()
-                with record_function("model_optimizer_step"):
+                with record_function(MODEL_OPTIMIZER_PROFILER_LABEL):
                     optimizer.step()
 
         profiler_metrics = {
