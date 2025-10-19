@@ -15,6 +15,8 @@ from pathlib import Path
 
 from tabulate import tabulate
 
+from experiments import single_gpu, torch_ddp
+
 
 TRAINING_RESULTS_METRIC_TYPE = "training"
 PROFILER_METRICS_TYPE = "profiler"
@@ -31,20 +33,8 @@ based on the type of experiment. For example: ddp_communication is not recorded 
 sense to include in the `single_gpu` experiment summary
 """
 EXPERIMENT_PROFILER_OPERATION_LABELS = {
-    # TODO: Move the label definitions into the experiments and pull them in here
-    "single_gpu": [
-        "model_forward",
-        "model_loss",
-        "model_backward",
-        "model_optimizer_step",
-    ],
-    "ddp": [
-        "model_forward",
-        "model_loss",
-        "model_backward",
-        "ddp_communication",
-        "model_optimizer_step",
-    ],
+    "single_gpu": single_gpu.EXPERIMENT_PROFILER_LABELS,
+    "ddp": torch_ddp.EXPERIMENT_PROFILER_LABELS,
 }
 
 
