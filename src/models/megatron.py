@@ -48,3 +48,5 @@ class SimpleMegatronTransformerDecoder(nn.Module):
             bias=False,
             skip_bias_add=False,
         )
+        # TODO: Reminder: self.head(x) can still be used, but in megatron land, it returns a tuple: logits, bias
+        # We need to be aware of this in `def forward` otherwise we'll be passing garbage around
