@@ -8,7 +8,7 @@ from megatron.core.model_parallel_config import ModelParallelConfig
 
 def pytorch_linear_init(weights):
     """
-    MGT requires you to handle weight initialization, where as PyTorch provides some
+    MT requires you to handle weight initialization, where as PyTorch provides some
     kind of "reasonable defaults."
 
     Attempting to keep "experiment parity", we try to initialize weights the same way
@@ -30,7 +30,7 @@ class SimpleMegatronTransformerDecoder(nn.Module):
 
         # TODO: Depending on how this plays with initialize_megatron(), we may need to move this/pass it in
         # All things megatron require a configuration
-        mgt_parallel_config = ModelParallelConfig()
+        mt_parallel_config = ModelParallelConfig()
 
         self.tok_emb = nn.Embedding(vocab_size, d_model)
         self.pos_emb = nn.Parameter(torch.zeros(1, seq_len, d_model))
@@ -38,12 +38,12 @@ class SimpleMegatronTransformerDecoder(nn.Module):
         self.layers = nn.ModuleList([]) # TODO: 
 
         # We need to map from the model dimension back to the vocab dimension
-        # The MGT ouptut layer is a column parallel op: https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/models/gpt/gpt_model.py#L234C49-L234C69
+        # The MT ouptut layer is a column parallel op: https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/models/gpt/gpt_model.py#L234C49-L234C69
         # TODO: Run an experiment with Row vs Column parallel ops and see if it has any effect
         self.head = tensor_parallel.ColumnParallelLinear(
             d_model,
             vocab_size,
-            config=mgt_parallel_config,
+            config=mt_parallel_config,
             init_method=pytorch_linear_init,
             bias=False,
             skip_bias_add=False,
