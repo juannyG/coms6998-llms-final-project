@@ -11,3 +11,4 @@ megatron-core
 # Could be useful for plotting results?
 #matplotlib
 #pandas
+-e . # For development and script execution, do a local + editable install
