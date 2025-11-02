@@ -42,6 +42,7 @@ setup_venv() {
     cd /insomnia001/depts/edu/COMS-E6998-015/<UNI>/sllm-final-project-env
     source bin/activate
     cd proj
+    pip install -r requirements.txt
 }
 ```
 

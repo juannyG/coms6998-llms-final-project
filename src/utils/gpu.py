@@ -1,40 +1,46 @@
 __all__ = [
-    'gpu_memory_allocated',
-    'reset_peak_mem',
-    'gpu_utilization_percent',
+    "gpu_memory_allocated",
+    "reset_peak_mem",
+    "gpu_utilization_percent",
 ]
 
 import torch
-import pynvml
 
-pynvml.nvmlInit()
+from utils.device import get_device
 
+PYNVML_ENABLED = False
+try:
+    import pynvml
 
-"""
-TODO: These functions assume 1 GPU.
-
-* Need to update to become aware of local_rank
-* Need to write metrics to a file
-* SLURM job will (should?) dump all files back executed during job
-* Separate "post-train" script can aggregate cross-device metrics
-"""
+    pynvml.nvmlInit()
+    PYNVML_ENABLED = True
+except:
+    pass
 
 
 def gpu_memory_allocated():
     # returns current and peak allocated (MB)
-    if torch.cuda.is_available():
-        cur = torch.cuda.memory_allocated() / (1024**2)
-        peak = torch.cuda.max_memory_allocated() / (1024**2)
+    device = get_device()
+    if torch.cuda.is_available() and device.type != "cpu":
+        cur = torch.cuda.memory_allocated(device) / (1024**2)
+        peak = torch.cuda.max_memory_allocated(device) / (1024**2)
         return cur, peak
     return 0.0, 0.0
 
+
 def reset_peak_mem():
-    if torch.cuda.is_available():
-        torch.cuda.reset_peak_memory_stats()
+    device = get_device()
+    if torch.cuda.is_available() and device.type != "cpu":
+        device = get_device()
+        torch.cuda.reset_peak_memory_stats(device)
+
 
 def gpu_utilization_percent():
-    if torch.cuda.is_available():
-        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+    device = get_device()
+    if PYNVML_ENABLED and torch.cuda.is_available() and device.type != "cpu":
+        handle = pynvml.nvmlDeviceGetHandleByIndex(
+            device.index if device.index is not None else 0
+        )
         util = pynvml.nvmlDeviceGetUtilizationRates(handle)
         return util.gpu
     return 0
