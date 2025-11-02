@@ -1,5 +1,6 @@
 import os
 import time
+import datetime
 from functools import partial
 
 import torch
@@ -96,7 +97,12 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
     rank = int(os.environ["LOCAL_RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
     torch.cuda.set_device(rank)
-    torch.distributed.init_process_group(backend='nccl', world_size=world_size, rank=rank)
+    torch.distributed.init_process_group(
+        backend='nccl',
+        world_size=world_size,
+        rank=rank,
+        timeout=datetime.timedelta(seconds=30)
+    )
     parallel_state.initialize_model_parallel(tensor_model_parallel_size=world_size)
 
     try:
@@ -138,18 +144,29 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
 
         forward_back_func = get_forward_backward_func()
 
+        gpt_model.train()
+        step = total_tokens = 0
+        cur_mem = peak_mem = gpu_util = 0
+        token_throughputs = []
+        sample_throughputs = []
+        losses = []
+        reset_peak_mem()
+        t0 = time.perf_counter()
         warmup = conf["warmup_steps"]
         max_steps = conf["max_steps"]
         for step in range(max_steps):
             optimizer.zero_grad()
             
+            torch.cuda.synchronize() if device.type.startswith("cuda") else None
+            t_before = time.perf_counter()
+
             losses_reduced = forward_back_func(
                 forward_step_func=forward_step_func,
                 data_iterator=it,
                 model=gpt_model,
                 num_microbatches=1,
                 seq_length=conf["seq_len"],
-                micro_batch_size=8,
+                micro_batch_size=conf["batch_size"],
                 decoder_seq_length=conf["seq_len"],
                 forward_only=False,
             )
@@ -158,7 +175,74 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
 
             optimizer.step()
 
+            torch.cuda.synchronize() if device.type.startswith("cuda") else None
+            t_after = time.perf_counter()
+
+            # metrics
+            step_time = t_after - t_before
+            # We have to do things in a slightly different way, given that the dimensions are buried in the `forward_step_func` closure, but we can still compute tokens based on our parameters...
+            #tokens = B * (S - 1)  # tokens processed for training step
+            #samples = B
+            #total_tokens += tokens
+            micro_batch_size = conf["batch_size"]
+            seq_length = conf["seq_len"]
+            num_microbatches = 1
+
+            # These are constants, but, whatever - do it each time in the loop...
+            # Tweaked computation: Tokens per step = batch_size * (seq_len - 1) * num_microbatches
+            tokens = micro_batch_size * (seq_length - 1) * num_microbatches
+            samples = micro_batch_size * num_microbatches
+            total_tokens += tokens
+            if step >= warmup:
+                token_throughputs.append(tokens / step_time)
+                sample_throughputs.append(samples / step_time)
+                # TODO: Is it losses_reduced[0] because we're only doing single GPU stuff? Need to check this..
+                losses.append(losses_reduced[0]['loss'].item())
+
+            cur_mem, peak_mem = gpu_memory_allocated()
+            gpu_util = gpu_utilization_percent()
             if step % 10 == 0 or step == max_steps - 1:
-                print(f"Iteration {step}: Losses reduced: {losses_reduced}")
+                logger.info(
+                    "Training snapshot",
+                    extra={
+                        "extra": {
+                            "step": f"{step + 1}/{max_steps}",
+                            "loss": f"{losses_reduced[0]['loss'].item():.4f}",
+                            "step_time_s": f"{step_time:.4f}",
+                            "tokens_per_s": f"{tokens / step_time:,.0f}",
+                            "current_gpu_mem_MB": f"{cur_mem:.1f}",
+                            "peak_gpu_mem_MB": f"{peak_mem:.1f}",
+                            "gpu_util_percent": gpu_util,
+                        }
+                    },
+                )
+
+        total_time = time.perf_counter() - t0
+        avg_tokens_per_s = (
+            sum(token_throughputs) / len(token_throughputs) if token_throughputs else 0
+        )
+        avg_samples_per_s = (
+            sum(sample_throughputs) / len(sample_throughputs)
+            if sample_throughputs
+            else 0
+        )
+        avg_loss = sum(losses) / len(losses) if losses else None
+
+        logger.info(
+            "Training results",
+            extra={
+                "extra": {
+                    "avg_tokens_per_s": avg_tokens_per_s,
+                    "avg_samples_per_s": avg_samples_per_s,
+                    "avg_loss": avg_loss,
+                    "total_tokens": total_tokens,
+                    "total_time_s": total_time,
+                    "cur_gpu_mem_mb": cur_mem,
+                    "peak_gpu_mem_mb": peak_mem,
+                    "gpu_util_percent": gpu_util,
+                }
+            },
+        )
+
     finally:
         torch.distributed.destroy_process_group()
