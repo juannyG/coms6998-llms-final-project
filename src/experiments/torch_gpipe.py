@@ -22,6 +22,7 @@ import torch.nn.functional as F
 import torch.distributed as dist
 from torch.distributed.pipelining import PipelineStage, ScheduleGPipe
 from torch.utils.data import DataLoader
+from torch.profiler import profile, record_function, ProfilerActivity
 
 from datasets.synthetic import SyntheticDataset
 from utils.gpu import (
@@ -30,6 +31,17 @@ from utils.gpu import (
     reset_peak_mem,
 )
 
+# ---- profiler labels (match single_gpu) ----
+MODEL_FORWARD_PROFILER_LABEL = "model_forward"
+MODEL_LOSS_PROFILER_LABEL = "model_loss"
+MODEL_BACKWARD_PROFILER_LABEL = "model_backward"
+MODEL_OPTIMIZER_PROFILER_LABEL = "model_optimizer_step"
+EXPERIMENT_PROFILER_LABELS = [
+    MODEL_FORWARD_PROFILER_LABEL,
+    MODEL_LOSS_PROFILER_LABEL,
+    MODEL_BACKWARD_PROFILER_LABEL,
+    MODEL_OPTIMIZER_PROFILER_LABEL,
+]
 
 # ---------------------------
 # Partition wrapper (no model edits needed)
@@ -187,6 +199,12 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
       - Launch with torchrun (one process per stage).
       - conf must include: seq_len, vocab_size, batch_size, lr, warmup_steps, max_steps, n_layers, n_microbatches
     """
+    # Require torchrun; provide a clear error if not used
+    if "WORLD_SIZE" not in os.environ or "RANK" not in os.environ or "LOCAL_RANK" not in os.environ:
+        raise RuntimeError(
+            "torch_gpipe requires torchrun. Example:\n"
+            "  torchrun --standalone --nproc_per_node=2 run_experiment.py torch_gpipe cpu"
+        )
     world = int(os.environ.get("WORLD_SIZE", "1"))
     rank = int(os.environ.get("LOCAL_RANK", "0"))
 
@@ -263,15 +281,17 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
                 batch = batch.to(device, non_blocking=True)
                 B, S = batch.shape
 
-            # Broadcast the batch ONLY between rank 0 and the last rank (for loss)
+            # Only the LAST rank needs labels (targets) to compute the loss.
+            # Rank 0 sends the *same token tensor* as the target labels.
             if rank == 0:
-                dist.broadcast(batch, src=0, group=loss_group)
+                targets_for_last = batch
+                dist.broadcast(targets_for_last, src=0, group=loss_group)
                 targets_last = None
             elif rank == last_rank:
                 targets_last = torch.empty(
                     (conf["batch_size"], conf["seq_len"]), dtype=torch.long, device=device
                 )
-                dist.broadcast(targets_last, src=0, group=loss_group)
+                dist.broadcast(targets_last, src=0, group=loss_group)  # receive
             else:
                 targets_last = None  # middle ranks don't need labels
 
@@ -341,6 +361,95 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
                     "balance": balance,
                 }}
             )
+        
+        # ---------------------------
+        # PROFILER EXAMPLE (mirrors single_gpu)
+        # ---------------------------
+        steps = 8
+        # choose activities dynamically (CPU-only path avoids CUDA activity)
+        activities = [ProfilerActivity.CPU]
+        if device.type.startswith("cuda"):
+            activities.append(ProfilerActivity.CUDA)
+
+        if rank == 0 and it is None:
+            # safety, though rank 0 always has a loader
+            it = iter(DataLoader(dataset, batch_size=conf["batch_size"], shuffle=True, num_workers=2, pin_memory=True))
+
+        with profile(
+            activities=activities,
+            profile_memory=True,
+            record_shapes=True,
+            with_stack=False,
+        ) as prof:
+            for i in range(steps):
+                # Rank 0 fetches a batch
+                if rank == 0:
+                    try:
+                        batch = next(it)
+                    except StopIteration:
+                        it = iter(DataLoader(dataset, batch_size=conf["batch_size"], shuffle=True, num_workers=2, pin_memory=True))
+                        batch = next(it)
+                    batch = batch.to(device, non_blocking=True)
+
+                # Broadcast labels to last rank (match training loop)
+                if rank == 0:
+                    targets_for_last = batch
+                    dist.broadcast(targets_for_last, src=0, group=loss_group)
+                    targets_last = None
+                elif rank == last_rank:
+                    targets_last = torch.empty(
+                        (conf["batch_size"], conf["seq_len"]), dtype=torch.long, device=device
+                    )
+                    dist.broadcast(targets_last, src=0, group=loss_group)
+                else:
+                    targets_last = None
+
+                # Zero grad
+                optim.zero_grad(set_to_none=True)
+
+                # Profiled pipeline step
+                if rank == 0:
+                    with record_function(MODEL_FORWARD_PROFILER_LABEL):
+                        schedule.step(batch)
+                elif rank == last_rank:
+                    # We nest loss/backward labels around the schedule call.
+                    # (Internally, GPipe will compute per-microbatch loss then backprop.)
+                    with record_function(MODEL_LOSS_PROFILER_LABEL):
+                        with record_function(MODEL_BACKWARD_PROFILER_LABEL):
+                            schedule.step(target=targets_last, losses=None)
+                else:
+                    schedule.step()
+
+                # Optimizer step
+                with record_function(MODEL_OPTIMIZER_PROFILER_LABEL):
+                    optim.step()
+
+        # Log profiler metrics per-rank (simple and effective; DDP-style gather is optional)
+        profiler_metrics = {
+            "rank": rank,
+            "profiler_metrics": [
+                {
+                    "operation": k.key,
+                    "count": k.count,
+                    "cpu_memory_usage": k.cpu_memory_usage,
+                    "cpu_time_total": k.cpu_time_total,
+                    "device_memory_usage": k.device_memory_usage,
+                    "device_time_total": k.device_time_total,
+                    "device_type": str(k.device_type),
+                    "self_cpu_memory_usage": k.self_cpu_memory_usage,
+                    "self_cpu_time_total": k.self_cpu_time_total,
+                    "self_device_time_total": k.self_device_time_total,
+                    "self_device_memory_usage": k.self_device_memory_usage,
+                }
+                for k in prof.key_averages()
+            ]
+        }
+        # Each rank logs its own profile (helps diagnose imbalances per stage)
+        logger.info("Profiler metrics (GPipe)", extra={"extra": profiler_metrics})
+
+        # Optional: print a compact table on CPU-only runs like your DDP example
+        if device.type == "cpu":
+            print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))
 
     finally:
         dist.barrier()
