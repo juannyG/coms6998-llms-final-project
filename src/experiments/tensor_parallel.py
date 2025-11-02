@@ -12,6 +12,7 @@ from megatron.core.models.gpt.gpt_model import GPTModel
 from megatron.core.pipeline_parallel.schedules import get_forward_backward_func
 from megatron.core.tensor_parallel.random import model_parallel_cuda_manual_seed
 from megatron.core.transformer import TransformerConfig
+from torch.profiler import profile, record_function, ProfilerActivity
 from torch.utils.data import DataLoader
 
 from datasets.synthetic import SyntheticDataset
@@ -21,6 +22,17 @@ from utils.gpu import (
     gpu_utilization_percent,
     reset_peak_mem,
 )
+
+MODEL_FORWARD_PROFILER_LABEL = "model_forward"
+MODEL_LOSS_PROFILER_LABEL = "model_loss"
+MODEL_FORWARD_BACKWARD_PROFILER_LABEL = "model_forward_backward"
+MODEL_OPTIMIZER_PROFILER_LABEL = "model_optimizer_step"
+EXPERIMENT_PROFILER_LABELS = [
+    MODEL_FORWARD_PROFILER_LABEL,
+    MODEL_LOSS_PROFILER_LABEL,
+    MODEL_FORWARD_BACKWARD_PROFILER_LABEL,
+    MODEL_OPTIMIZER_PROFILER_LABEL,
+]
 
 
 class MegatronSyntheticDataset(SyntheticDataset):
@@ -54,13 +66,14 @@ def forward_step_func(data_iterator, gpt_model):
     """
 
     def loss_func(loss_mask, output_tensor):
-        losses = output_tensor.float()
-        loss_mask = loss_mask.view(-1).float()
-        loss = torch.sum(losses.view(-1) * loss_mask) / loss_mask.sum()
-        # If you have data parallel reduce loss across data parallel groups.
-        # If pipeline parallel, loss computation is done only in last stage.
+        with record_function(MODEL_LOSS_PROFILER_LABEL):
+            losses = output_tensor.float()
+            loss_mask = loss_mask.view(-1).float()
+            loss = torch.sum(losses.view(-1) * loss_mask) / loss_mask.sum()
+            # If you have data parallel reduce loss across data parallel groups.
+            # If pipeline parallel, loss computation is done only in last stage.
 
-        return loss, {"loss": loss}
+            return loss, {"loss": loss}
 
     device = get_device()
     data = next(data_iterator)
@@ -70,7 +83,8 @@ def forward_step_func(data_iterator, gpt_model):
     labels = data["labels"].to(device)
     loss_mask = data["loss_mask"].to(device)
 
-    output_tensor = gpt_model(tokens, position_ids, attention_mask, labels=labels)
+    with record_function(MODEL_FORWARD_PROFILER_LABEL):
+        output_tensor = gpt_model(tokens, position_ids, attention_mask, labels=labels)
 
     return output_tensor, partial(loss_func, loss_mask)
 
@@ -244,5 +258,49 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
             },
         )
 
+        steps = 8
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            profile_memory=True,
+            record_shapes=True,
+            with_stack=False,
+        ) as prof:
+            for i in range(steps):
+                optimizer.zero_grad()
+
+                with record_function(MODEL_FORWARD_BACKWARD_PROFILER_LABEL):
+                    losses_reduced = forward_back_func(
+                        forward_step_func=forward_step_func,
+                        data_iterator=it,
+                        model=gpt_model,
+                        num_microbatches=1,
+                        seq_length=conf["seq_len"],
+                        micro_batch_size=conf["batch_size"],
+                        decoder_seq_length=conf["seq_len"],
+                        forward_only=False,
+                    )
+
+                with record_function(MODEL_OPTIMIZER_PROFILER_LABEL):
+                    optimizer.step()
+
+        profiler_metrics = {
+            "profiler_metrics": [
+                {
+                    "operation": k.key,
+                    "count": k.count,
+                    "cpu_memory_usage": k.cpu_memory_usage,
+                    "cpu_time_total": k.cpu_time_total,
+                    "device_memory_usage": k.device_memory_usage,
+                    "device_time_total": k.device_time_total,
+                    "device_type": str(k.device_type),
+                    "self_cpu_memory_usage": k.self_cpu_memory_usage,
+                    "self_cpu_time_total": k.self_cpu_time_total,
+                    "self_device_time_total": k.self_device_time_total,
+                    "self_device_memory_usage": k.self_device_memory_usage,
+                }
+                for k in prof.key_averages()
+            ]
+        }
+        logger.info("Profiler metrics", extra={"extra": profiler_metrics})
     finally:
         torch.distributed.destroy_process_group()
