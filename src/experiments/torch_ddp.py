@@ -7,7 +7,6 @@ Citation:
 torchrun --standalone --nproc_per_node=2 run_experiment.py torch_ddp <CONF_KEY>
 """
 
-import os
 import time
 import datetime
 

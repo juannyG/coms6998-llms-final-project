@@ -15,7 +15,7 @@ from pathlib import Path
 
 from tabulate import tabulate
 
-from experiments import single_gpu, torch_ddp
+from experiments import single_gpu, torch_ddp, tensor_parallel
 
 
 TRAINING_RESULTS_METRIC_TYPE = "training"
@@ -35,6 +35,7 @@ sense to include in the `single_gpu` experiment summary
 EXPERIMENT_PROFILER_OPERATION_LABELS = {
     "single_gpu": single_gpu.EXPERIMENT_PROFILER_LABELS,
     "ddp": torch_ddp.EXPERIMENT_PROFILER_LABELS,
+    "tensor_parallel": tensor_parallel.EXPERIMENT_PROFILER_LABELS,
 }
 
 
@@ -177,6 +178,8 @@ def main():
                 operation_labels = EXPERIMENT_PROFILER_OPERATION_LABELS["single_gpu"]
             elif "ddp" in experiment:
                 operation_labels = EXPERIMENT_PROFILER_OPERATION_LABELS["ddp"]
+            elif "tensor_parallel" in experiment:
+                operation_labels = EXPERIMENT_PROFILER_OPERATION_LABELS["tensor_parallel"]
             print(format_profile_metrics(metrics, operation_labels))
 
 
