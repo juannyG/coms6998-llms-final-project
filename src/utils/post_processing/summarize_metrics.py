@@ -16,6 +16,7 @@ from pathlib import Path
 from tabulate import tabulate
 
 from experiments import single_gpu, torch_ddp, tensor_parallel
+from utils.post_processing.metrics_dataclasses import TrainingResults, ProfilerSummary
 
 
 TRAINING_RESULTS_METRIC_TYPE = "training"
@@ -39,68 +40,30 @@ EXPERIMENT_PROFILER_OPERATION_LABELS = {
 }
 
 
-def format_training_results(result):
-    # TODO: Eventually support diff formats (i.e. CSV, etc)
+def format_training_results(training_results):
     table = [
-        ["Avg Tokens/sec", f"{result['avg_tokens_per_s']:,.0f}"],
-        ["Avg Samples/sec", f"{result['avg_samples_per_s']:,.1f}"],
-        ["Avg Loss", f"{result['avg_loss']:.4f}"],
-        ["Total Tokens", f"{result['total_tokens']:,}"],
-        ["Total Time", f"{result['total_time_s']:.2f} sec"],
-        ["Peak GPU Mem", f"{result['peak_gpu_mem_mb']:.1f} MB"],
-        ["GPU Utilization", f"{result['gpu_util_percent']}%"],
+        ["Avg Tokens/sec", f"{training_results.avg_tokens_per_s:,.0f}"],
+        ["Avg Samples/sec", f"{training_results.avg_samples_per_s:,.1f}"],
+        ["Avg Loss", f"{training_results.avg_loss:.4f}"],
+        ["Total Tokens", f"{training_results.total_tokens:,}"],
+        ["Total Time", f"{training_results.total_time_s:.2f} sec"],
+        ["Peak GPU Mem", f"{training_results.peak_gpu_mem_mb:.1f} MB"],
+        ["GPU Utilization", f"{training_results.gpu_util_percent}%"],
     ]
     return tabulate(table, headers=["Metric", "Value"], tablefmt="github")
 
 
-def format_profile_metrics(results, operation_labels):
-    operation_metrics = {
-        op_label: {
-            "calls": 0,
-            "cpu_time_ms": 0.0,
-            "gpu_time_ms": 0.0,
-            "cpu_mem_mb": 0.0,
-            "gpu_mem_mb": 0.0,
-        }
-        for op_label in operation_labels
-    }
-
-    for r in results["profiler_metrics"]:
-        if r.get("operation") in operation_labels:
-            op_label = r["operation"]
-            d_type = r["device_type"]
-            operation_metrics[op_label]["calls"] = r["count"]
-
-            if d_type == "DeviceType.CPU":
-                operation_metrics[op_label]["cpu_time_ms"] += r["cpu_time_total"] / 1000
-                operation_metrics[op_label]["cpu_mem_mb"] += r["cpu_memory_usage"] / (
-                    1024**2
-                )
-
-                # Super weird - but, it appears pytorch profiling puts the meaningful GPU info in the device type CPU records
-                operation_metrics[op_label]["gpu_time_ms"] += (
-                    r["device_time_total"] / 1000
-                )
-                operation_metrics[op_label]["gpu_mem_mb"] += max(
-                    r["device_memory_usage"], 0
-                ) / (1024**2)
-
-            elif d_type == "DeviceType.CUDA":
-                # Use only "self" time; total time was already counted in CPU block (see above comment)
-                operation_metrics[op_label]["gpu_time_ms"] += (
-                    r["self_device_time_total"] / 1000
-                )
-
+def format_profiler_summary(profiler_summary):
     table = [
         [
             op_label,
-            metric["calls"],
-            f"{metric['cpu_time_ms']:.2f}",
-            f"{metric['gpu_time_ms']:.2f}",
-            f"{metric['cpu_mem_mb']:.2f}",
-            f"{metric['gpu_mem_mb']:.2f}",
+            profiler_op_summary.calls,
+            f"{profiler_op_summary.cpu_time_ms:.2f}",
+            f"{profiler_op_summary.gpu_time_ms:.2f}",
+            f"{profiler_op_summary.cpu_mem_mb:.2f}",
+            f"{profiler_op_summary.gpu_mem_mb:.2f}",
         ]
-        for op_label, metric in operation_metrics.items()
+        for op_label, profiler_op_summary in profiler_summary.operations.items()
     ]
     return tabulate(
         table,
@@ -153,7 +116,7 @@ def main():
     # Load the log file(s)
     all_files = []
     if args.dir:
-        all_files.extend(sorted(glob.glob(f"{args.dir}/*.log")))
+        all_files.extend(sorted(Path(args.dir).rglob("*.log")))
     for f in args.files:
         all_files.extend(sorted(glob.glob(f"{f}")))
     if not all_files:
@@ -163,7 +126,13 @@ def main():
 
     # Print summary tables for experiment type
     for fpath in all_files:
-        experiment = Path(fpath).stem
+        run_path = Path(fpath).parent  # logs/torch_ddp/10m/1762628113/
+        strategy = run_path.parts[-3]  # e.g., torch_ddp
+        model_size = run_path.parts[-2]  # e.g., 10m
+        run_id = run_path.parts[-1]  # e.g., 1762628113
+        device_id = Path(fpath).stem  # e.g., cuda_1
+        experiment = f"{strategy}/{model_size}/{run_id}/{device_id}"
+
         metrics = get_metrics(fpath, METRICS_MESSAGE_MAP[args.metric_type])
         if not metrics:
             print(f"No metrics found for {fpath} of type {args.metric_type}")
@@ -171,7 +140,8 @@ def main():
 
         print(f"\n=== Results for experiment: {experiment} ===")
         if args.metric_type == TRAINING_RESULTS_METRIC_TYPE:
-            print(format_training_results(metrics))
+            training_results = TrainingResults.from_dict(metrics)
+            print(format_training_results(training_results))
         elif args.metric_type == PROFILER_METRICS_TYPE:
             operation_labels = []
             if "single_gpu" in experiment:
@@ -179,8 +149,12 @@ def main():
             elif "ddp" in experiment:
                 operation_labels = EXPERIMENT_PROFILER_OPERATION_LABELS["ddp"]
             elif "tensor_parallel" in experiment:
-                operation_labels = EXPERIMENT_PROFILER_OPERATION_LABELS["tensor_parallel"]
-            print(format_profile_metrics(metrics, operation_labels))
+                operation_labels = EXPERIMENT_PROFILER_OPERATION_LABELS[
+                    "tensor_parallel"
+                ]
+            profiler_summary = ProfilerSummary()
+            profiler_summary.update_from_profiler_metrics(metrics, operation_labels)
+            print(format_profiler_summary(profiler_summary))
 
 
 if __name__ == "__main__":

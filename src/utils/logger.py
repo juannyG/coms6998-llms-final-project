@@ -25,7 +25,13 @@ class JsonlFormatter(logging.Formatter):
 
 
 def get_logger(exp_type, model_conf, log_path, level=logging.INFO):
-    log_f = f'{log_path}/run_{exp_type}_{model_conf}_{_get_device_str()}_{int(time.time())}.log'
+    # Build structured directory path
+    run_ts = int(time.time())
+    run_dir = os.path.join(log_path, exp_type, model_conf, str(run_ts))
+    os.makedirs(run_dir, exist_ok=True)  # Create dirs recursively if needed
+
+    # Build log file path
+    log_f = os.path.join(run_dir, f"{_get_device_str()}.log")
 
     logger = logging.getLogger(log_f)
     logger.setLevel(level)
