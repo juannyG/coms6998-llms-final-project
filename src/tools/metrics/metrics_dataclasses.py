@@ -3,11 +3,20 @@ These dataclasses are meant to act as datamodel schemas for converting our
 different result types into things we can use across aggregation scripts.
 """
 
+import abc
 from dataclasses import dataclass, field
+
+from tabulate import tabulate
+
+
+class TabularMetric(abc.ABC):
+    @abc.abstractmethod
+    def to_table(self):
+        pass
 
 
 @dataclass
-class TrainingResults:
+class TrainingResults(TabularMetric):
     avg_tokens_per_s: float = 0.0
     avg_samples_per_s: float = 0.0
     avg_loss: float = 0.0
@@ -27,6 +36,18 @@ class TrainingResults:
             peak_gpu_mem_mb=d["peak_gpu_mem_mb"],
             gpu_util_percent=d.get("gpu_util_percent"),
         )
+
+    def to_table(self):
+        table = [
+            ["Avg Tokens/sec", f"{self.avg_tokens_per_s:,.0f}"],
+            ["Avg Samples/sec", f"{self.avg_samples_per_s:,.1f}"],
+            ["Avg Loss", f"{self.avg_loss:.4f}"],
+            ["Total Tokens", f"{self.total_tokens:,}"],
+            ["Total Time", f"{self.total_time_s:.2f} sec"],
+            ["Peak GPU Mem", f"{self.peak_gpu_mem_mb:.1f} MB"],
+            ["GPU Utilization", f"{self.gpu_util_percent}%"],
+        ]
+        return tabulate(table, headers=["Metric", "Value"], tablefmt="github")
 
 
 """
@@ -63,19 +84,20 @@ class ProfilerOperationSummary:
 
 
 @dataclass
-class ProfilerSummary:
+class ProfilerSummary(TabularMetric):
     # operations[op_label] --> ProfilerOperationSummary
+    operation_labels: list[str]
     operations: dict = field(default_factory=dict)
 
-    def update_from_profiler_metrics(self, records, operation_labels):
+    def update_from_profiler_metrics(self, records):
         self.operations = {
             op_label: ProfilerOperationSummary(operation=op_label)
-            for op_label in operation_labels
+            for op_label in self.operation_labels
         }
 
         for r in records:
             op = r["operation"]
-            if op not in operation_labels:
+            if op not in self.operation_labels:
                 continue
 
             d_type = r["device_type"]
@@ -84,3 +106,28 @@ class ProfilerSummary:
                 self.operations[op].add_cpu_metrics(r)
             elif d_type == "DeviceType.CUDA":
                 self.operations[op].add_cuda_metrics(r)
+
+    def to_table(self):
+        table = [
+            [
+                op_label,
+                profiler_op_summary.calls,
+                f"{profiler_op_summary.cpu_time_ms:.2f}",
+                f"{profiler_op_summary.gpu_time_ms:.2f}",
+                f"{profiler_op_summary.cpu_mem_mb:.2f}",
+                f"{profiler_op_summary.gpu_mem_mb:.2f}",
+            ]
+            for op_label, profiler_op_summary in self.operations.items()
+        ]
+        return tabulate(
+            table,
+            headers=[
+                "Operation",
+                "Calls",
+                "CPU Time (ms)",
+                "GPU Time (ms)",
+                "CPU Memory (MB)",
+                "GPU Memory (MB)",
+            ],
+            tablefmt="github",
+        )
