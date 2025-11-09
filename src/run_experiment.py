@@ -15,7 +15,11 @@ LOG_PATH = os.environ.get("LOG_PATH", os.path.join(CWD, "..", "logs"))
 os.path.join
 EXPERIMENT_TYPES = {
     "single_gpu": single_gpu.run_single_gpu_experiment,
-    "torch_ddp": torch_ddp.run_torch_ddp_experiment
+    "torch_ddp" : torch_ddp.run_torch_ddp_experiment,
+    "ds_zero1"  : lambda model, conf, device, logger: run_deepspeed_zero_experiment(model, conf, device, logger, zero_stage=1),
+    "ds_zero2"  : lambda model, conf, device, logger: run_deepspeed_zero_experiment(model, conf, device, logger, zero_stage=2),
+    "ds_zero3"  : lambda model, conf, device, logger: run_deepspeed_zero_experiment(model, conf, device, logger, zero_stage=3),
+    "ds_zero3_offload"  : lambda model, conf, device, logger: run_deepspeed_zero_experiment(model, conf, device, logger, zero_stage=3, offload=True),
 }
 
 
