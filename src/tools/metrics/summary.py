@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from experiments import single_gpu, torch_ddp, tensor_parallel
+from tools.metrics.experiment_summary import generate_experiment_summary
 from tools.metrics.metrics_dataclasses import TrainingResults, ProfilerSummary
 
 DEVICE_LEVEL = "device"
@@ -31,6 +32,7 @@ class DeviceSummary:
     sense to include in the `single_gpu` experiment summary
     """
 
+    # TODO: Instead of importing these here, flip it around: define the labels here and have the experiments import them
     EXPERIMENT_PROFILER_OPERATION_LABELS = {
         "single_gpu": single_gpu.EXPERIMENT_PROFILER_LABELS,
         "ddp": torch_ddp.EXPERIMENT_PROFILER_LABELS,
@@ -54,8 +56,12 @@ class DeviceSummary:
     summary: Any
 
     @property
-    def experiment(self):
-        return f"{self.strategy}/{self.model_size}/{self.run_id}/{self.device_id}"
+    def experiment_key(self):
+        return f"{self.strategy}/{self.model_size}/{self.run_id}"
+
+    @property
+    def device_experiment(self):
+        return f"{self.experiment_key}/{self.device_id}"
 
 
 class DeviceLogIterator:
@@ -168,8 +174,10 @@ def main():
     dev_log_iterator = DeviceLogIterator(args.metric_type, all_files)
     if args.level == DEVICE_LEVEL:
         for device_summary in dev_log_iterator:
-            print(f"\n=== Results for experiment: {device_summary.experiment} ===")
+            print(f"\n=== Results for experiment: {device_summary.device_experiment} ===")
             print(device_summary.summary.to_table())
+    elif args.level == EXPERIMENT_LEVEL:
+        generate_experiment_summary(dev_log_iterator)
 
 
 if __name__ == "__main__":

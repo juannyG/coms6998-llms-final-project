@@ -22,6 +22,7 @@ class TrainingResults(TabularMetric):
     avg_loss: float = 0.0
     total_tokens: int = 0
     total_time_s: float = 0.0
+    total_gpu_mem_mb: float = 0.0
     peak_gpu_mem_mb: float = 0.0
     gpu_util_percent: float = 0.0
 
@@ -34,8 +35,40 @@ class TrainingResults(TabularMetric):
             total_tokens=d["total_tokens"],
             total_time_s=d["total_time_s"],
             peak_gpu_mem_mb=d["peak_gpu_mem_mb"],
+            total_gpu_mem_mb=d["peak_gpu_mem_mb"],
             gpu_util_percent=d.get("gpu_util_percent"),
         )
+
+    @classmethod
+    def aggregate(cls, training_results):
+        """
+        Produce an aggregate TrainingResults instance based on a list of TrainingResults
+
+        Avg tokens/sec per device is summed across devices
+        Avg samples/sec per device is summed across devices
+        Avg loss per device is averaged across devices - it's going to be the same anyway
+        Total tokens per device is summed across devices
+        Total time is the maximum across devices
+        Peak GPU per device is the max across devices
+        Total GPU per device is summed across devices
+        GPU util % per device can be averaged across devices
+        """
+
+        agg = cls()
+        for tr in training_results:
+            agg.avg_tokens_per_s += tr.avg_tokens_per_s
+            agg.avg_samples_per_s += tr.avg_samples_per_s
+            agg.avg_loss += tr.avg_loss
+            agg.total_tokens += tr.total_tokens
+            agg.total_time_s = max(agg.total_time_s, tr.total_time_s)
+            agg.peak_gpu_mem_mb = max(agg.peak_gpu_mem_mb, tr.peak_gpu_mem_mb)
+            agg.total_gpu_mem_mb += tr.total_gpu_mem_mb
+            agg.gpu_util_percent += tr.gpu_util_percent
+
+        # Do the average after the summations
+        agg.avg_loss /= len(training_results)
+        agg.gpu_util_percent /= len(training_results)
+        return agg
 
     def to_table(self):
         table = [
@@ -45,7 +78,8 @@ class TrainingResults(TabularMetric):
             ["Total Tokens", f"{self.total_tokens:,}"],
             ["Total Time", f"{self.total_time_s:.2f} sec"],
             ["Peak GPU Mem", f"{self.peak_gpu_mem_mb:.1f} MB"],
-            ["GPU Utilization", f"{self.gpu_util_percent}%"],
+            ["Total GPU Mem", f"{self.total_gpu_mem_mb:.1f} MB"],
+            ["GPU Utilization", f"{self.gpu_util_percent:.2f}%"],
         ]
         return tabulate(table, headers=["Metric", "Value"], tablefmt="github")
 
@@ -82,6 +116,19 @@ class ProfilerOperationSummary:
         # Use only "self" time; total time was already counted in CPU block (see above comment)
         self.gpu_time_ms += record["self_device_time_total"] / 1000
 
+    def merge(self, other):
+        """
+        Take another ProfilerOperationSummary and merge the metrics
+
+        For any operation, we take the sum of each device's operation to get an experiment-level
+        view of the operation
+        """
+        self.calls += other.calls
+        self.cpu_time_ms += other.cpu_time_ms
+        self.gpu_time_ms += other.gpu_time_ms
+        self.cpu_mem_mb += other.cpu_mem_mb
+        self.gpu_mem_mb += other.gpu_mem_mb
+
 
 @dataclass
 class ProfilerSummary(TabularMetric):
@@ -106,6 +153,17 @@ class ProfilerSummary(TabularMetric):
                 self.operations[op].add_cpu_metrics(r)
             elif d_type == "DeviceType.CUDA":
                 self.operations[op].add_cuda_metrics(r)
+
+    @classmethod
+    def aggregate(cls, other_profiler_summaries):
+        agg = cls(operation_labels=other_profiler_summaries[0].operation_labels)
+        for other_profiler_summary in other_profiler_summaries:
+            for op, op_summary in other_profiler_summary.operations.items():
+                if op not in agg.operations:
+                    # Init the op level summary if we don't have one yet
+                    agg.operations[op] = ProfilerOperationSummary(operation=op)
+                agg.operations[op].merge(op_summary)
+        return agg
 
     def to_table(self):
         table = [
