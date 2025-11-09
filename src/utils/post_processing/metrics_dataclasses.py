@@ -64,7 +64,7 @@ class ProfilerOperationSummary:
 
 @dataclass
 class ProfilerSummary:
-    # operations[op_label] = ProfilerOperationSummary
+    # operations[op_label] --> ProfilerOperationSummary
     operations: dict = field(default_factory=dict)
 
     def update_from_profiler_metrics(self, records, operation_labels):
@@ -75,6 +75,9 @@ class ProfilerSummary:
 
         for r in records:
             op = r["operation"]
+            if op not in operation_labels:
+                continue
+
             d_type = r["device_type"]
             self.operations[op].calls = r["count"]
             if d_type == "DeviceType.CPU":

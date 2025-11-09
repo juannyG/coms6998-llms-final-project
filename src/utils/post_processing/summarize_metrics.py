@@ -153,7 +153,7 @@ def main():
                     "tensor_parallel"
                 ]
             profiler_summary = ProfilerSummary()
-            profiler_summary.update_from_profiler_metrics(metrics, operation_labels)
+            profiler_summary.update_from_profiler_metrics(metrics["profiler_metrics"], operation_labels)
             print(format_profiler_summary(profiler_summary))
 
 
