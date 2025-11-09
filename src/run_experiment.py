@@ -12,7 +12,7 @@ from utils.logger import get_logger
 
 CWD = os.path.dirname(os.path.abspath(__file__))
 LOG_PATH = os.environ.get("LOG_PATH", os.path.join(CWD, "..", "logs"))
-os.path.join
+
 EXPERIMENT_TYPES = {
     "single_gpu": single_gpu.run_single_gpu_experiment,
     "torch_ddp": torch_ddp.run_torch_ddp_experiment,

@@ -16,4 +16,5 @@ export TORCH_NCCL_BLOCKING_WAIT=1
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_TIMEOUT=30
 
+export RUN_ID=$(date +%s)
 torchrun --standalone --nproc_per_node=2 run_experiment.py torch_ddp 10m
