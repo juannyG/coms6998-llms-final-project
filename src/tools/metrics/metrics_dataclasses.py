@@ -49,8 +49,8 @@ class TrainingResults(TabularMetric):
         Avg loss per device is averaged across devices - it's going to be the same anyway
         Total tokens per device is summed across devices
         Total time is the maximum across devices
-        Peak GPU per device is the max across devices
-        Total GPU per device is summed across devices
+        Peak GPU memory per device is the max across devices
+        Total GPU memory per device is summed across devices
         GPU util % per device can be averaged across devices
         """
 
