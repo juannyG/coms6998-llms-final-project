@@ -26,7 +26,8 @@ class JsonlFormatter(logging.Formatter):
 
 def get_logger(exp_type, model_conf, log_path, level=logging.INFO):
     # Build structured directory path
-    run_ts = int(time.time())
+    # Should be called with `export RUN_ID=$(date +%s)` to guarantee no race conditions/sync issues
+    run_ts = os.environ.get("RUN_ID", str(int(time.time())))
     run_dir = os.path.join(log_path, exp_type, model_conf, str(run_ts))
     os.makedirs(run_dir, exist_ok=True)  # Create dirs recursively if needed
 
