@@ -203,7 +203,7 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
     if "WORLD_SIZE" not in os.environ or "RANK" not in os.environ or "LOCAL_RANK" not in os.environ:
         raise RuntimeError(
             "torch_gpipe requires torchrun. Example:\n"
-            "  torchrun --standalone --nproc_per_node=2 run_experiment.py torch_gpipe cpu"
+            "  torchrun --standalone --nproc_per_node=3 run_experiment.py torch_gpipe cpu"
         )
     world = int(os.environ.get("WORLD_SIZE", "1"))
     rank = int(os.environ.get("LOCAL_RANK", "0"))
@@ -249,7 +249,7 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
         )
 
         # Per-stage optimizer
-        optim = torch.optim.AdamW(stage.submodule.parameters(), lr=conf["lr"])
+        optim = torch.optim.AdamW(stage.submod.parameters(), lr=conf["lr"])
 
         # GPipe schedule (sync SGD semantics)
         schedule = ScheduleGPipe(
@@ -349,7 +349,7 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
             avg_tps = (sum(token_tputs)/len(token_tputs)) if token_tputs else 0
             avg_sps = (sum(sample_tputs)/len(sample_tputs)) if sample_tputs else 0
             logger.info(
-                "Training results (GPipe)",
+                "Training results",
                 extra={"extra": {
                     "avg_tokens_per_s": avg_tps,
                     "avg_samples_per_s": avg_sps,
@@ -445,7 +445,7 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
             ]
         }
         # Each rank logs its own profile (helps diagnose imbalances per stage)
-        logger.info("Profiler metrics (GPipe)", extra={"extra": profiler_metrics})
+        logger.info("Profiler metrics", extra={"extra": profiler_metrics})
 
         # Optional: print a compact table on CPU-only runs like your DDP example
         if device.type == "cpu":
