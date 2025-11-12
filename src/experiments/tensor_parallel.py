@@ -134,7 +134,7 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
             vocab_size=conf["vocab_size"],
             max_sequence_length=conf["seq_len"],
         )
-        gpt_model.to(device)
+        gpt_model.to(device=device, dtype=conf["dtype"])
 
         # TODO: Remove these...
         #print(gpt_model)
