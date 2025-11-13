@@ -32,15 +32,19 @@ from utils.gpu import (
 )
 
 # ---- profiler labels (match single_gpu) ----
-MODEL_PIPELINE_STEP_LABEL = "pipeline_step"
+MODEL_PIPELINE_STEP_PROFILER_LABEL = "pipeline_step"
 MODEL_FORWARD_PROFILER_LABEL = "model_forward"
 MODEL_LOSS_PROFILER_LABEL = "model_loss"
 MODEL_OPTIMIZER_PROFILER_LABEL = "model_optimizer_step"
+NCCL_BROADCAST_PROFILER_LABEL = "nccl:broadcast"
+C10D_RECV_PROFILER_LABEL = "c10d:recv_"
 EXPERIMENT_PROFILER_LABELS = [
-    MODEL_PIPELINE_STEP_LABEL,
+    MODEL_PIPELINE_STEP_PROFILER_LABEL,
     MODEL_FORWARD_PROFILER_LABEL,
     MODEL_LOSS_PROFILER_LABEL,
     MODEL_OPTIMIZER_PROFILER_LABEL,
+    NCCL_BROADCAST_PROFILER_LABEL,
+    C10D_RECV_PROFILER_LABEL
 ]
 
 # ---------------------------
@@ -94,7 +98,7 @@ class DecoderStageModule(nn.Module):
           - On the last stage, we return logits (B,S,V). Otherwise we return hidden (B,S,D).
         """
 
-        with record_function(MODEL_PIPELINE_STEP_LABEL):
+        with record_function(MODEL_FOWRWARD_PROFILER_LABEL):
             if self.tok_emb is not None:
                 # x is tokens (B,S) here
                 B, S = x.shape
@@ -130,17 +134,13 @@ def compute_balance(n_layers: int, n_stages: int) -> List[int]:
       [embed] + [block x ?] + ... + [block x ?] + [head]
     where the sum equals 1 + n_layers + 1.
     """
-    if n_stages == 1:
-        return [1 + n_layers + 1]
+    total_modules = 1 + n_layers + 1
+    base = total_modules // n_stages
+    extra = total_modules % n_stages
 
-    mid_stages = max(n_stages - 2, 1)
-    base = n_layers // mid_stages
-    extra = n_layers % mid_stages
-
-    balance = [1]
-    for i in range(mid_stages):
+    balance = []
+    for i in range(n_stages):
         balance.append(base + (1 if i < extra else 0))
-    balance.append(1)
     return balance
 
 
@@ -189,8 +189,8 @@ def tokenwise_loss_fn(outputs: torch.Tensor, targets: torch.Tensor) -> torch.Ten
 def _init_dist(device):
     # Pick backend based on device
     if device.type.startswith("cuda"):
-        dist.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=180))
-        torch.cuda.set_device(device)
+        torch.cuda.set_device(device.index)
+        dist.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=180), device_id=device.index)
     else:
         dist.init_process_group(backend="gloo", timeout=datetime.timedelta(seconds=180))
 
@@ -208,15 +208,15 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
             "torch_gpipe requires torchrun. Example:\n"
             "  torchrun --standalone --nproc_per_node=3 run_experiment.py torch_gpipe cpu"
         )
-    world = int(os.environ.get("WORLD_SIZE", "1"))
-    rank = int(os.environ.get("LOCAL_RANK", "0"))
-
     _init_dist(device)
+    rank  = dist.get_rank()
+    world = dist.get_world_size()
 
     try:
         # Form a group for broadcasting labels from rank 0 -> last rank only
         last_rank = world - 1
         loss_group = dist.new_group(ranks=[0, last_rank])
+        #dist.barrier()
 
         # Dataset / loader (only rank 0 needs a loader)
         dataset = SyntheticDataset(
@@ -257,7 +257,7 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
         # GPipe schedule (sync SGD semantics)
         schedule = ScheduleGPipe(
             stage,
-            n_microbatches=conf.get("n_microbatches", 8),
+            n_microbatches=conf.get("n_microbatches", 16),
             loss_fn=tokenwise_loss_fn
         )
 
@@ -282,25 +282,29 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
                 except StopIteration:
                     it = iter(loader)
                     batch = next(it)
-                batch = batch.to(device, non_blocking=True)
+                batch = batch.to(device, non_blocking=True).contiguous()
                 B, S = batch.shape
 
             # Only the LAST rank needs labels (targets) to compute the loss.
             # Rank 0 sends the *same token tensor* as the target labels.
             if rank == 0:
+                #dist.barrier(group=loss_group)
                 targets_for_last = batch
                 dist.broadcast(targets_for_last, src=0, group=loss_group)
                 targets_last = None
+                #dist.barrier(group=loss_group)
             elif rank == last_rank:
+                #dist.barrier(group=loss_group)
                 targets_last = torch.empty(
-                    (conf["batch_size"], conf["seq_len"]), dtype=torch.long, device=device
+                    (conf["batch_size"], conf["seq_len"]), dtype=torch.long, device=device,
+                    memory_format=torch.contiguous_format
                 )
                 dist.broadcast(targets_last, src=0, group=loss_group)  # receive
+                #dist.barrier(group=loss_group)
             else:
                 targets_last = None  # middle ranks don't need labels
 
-            # Timers (rank 0)
-            if device.type.startswith("cuda") and rank == 0:
+            if device.type.startswith("cuda"):
                 torch.cuda.synchronize()
 
             t_before = time.perf_counter()
@@ -420,7 +424,7 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
                 optim.zero_grad(set_to_none=True)
 
                 # Profiled pipeline step
-                with record_function(MODEL_PIPELINE_STEP_LABEL):
+                with record_function(MODEL_PIPELINE_STEP_PROFILER_LABEL):
                     if rank == 0:
                         with record_function(MODEL_FORWARD_PROFILER_LABEL):
                             schedule.step(batch)
