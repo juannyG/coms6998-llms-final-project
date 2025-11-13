@@ -32,14 +32,14 @@ from utils.gpu import (
 )
 
 # ---- profiler labels (match single_gpu) ----
+MODEL_PIPELINE_STEP_LABEL = "pipeline_step"
 MODEL_FORWARD_PROFILER_LABEL = "model_forward"
 MODEL_LOSS_PROFILER_LABEL = "model_loss"
-MODEL_BACKWARD_PROFILER_LABEL = "model_backward"
 MODEL_OPTIMIZER_PROFILER_LABEL = "model_optimizer_step"
 EXPERIMENT_PROFILER_LABELS = [
+    MODEL_PIPELINE_STEP_LABEL,
     MODEL_FORWARD_PROFILER_LABEL,
     MODEL_LOSS_PROFILER_LABEL,
-    MODEL_BACKWARD_PROFILER_LABEL,
     MODEL_OPTIMIZER_PROFILER_LABEL,
 ]
 
@@ -93,29 +93,31 @@ class DecoderStageModule(nn.Module):
           - On middle/last stages, x is already the hidden (B,S,D).
           - On the last stage, we return logits (B,S,V). Otherwise we return hidden (B,S,D).
         """
-        if self.tok_emb is not None:
-            # x is tokens (B,S) here
-            B, S = x.shape
-            x = self.tok_emb(x) + self.pos_emb[:, :S, :]
-            x = self.drop(x)
-        else:
-            # x is hidden states
-            B, S, _ = x.shape
 
-        # Run our local block slice (pre-LN decoder with MHA)
-        for layer in self.blocks:
-            attn_ln = layer["ln1"](x)
-            attn_mask = self._causal_mask(S, attn_ln.device, attn_ln.dtype)
-            attn_out, _ = layer["attn"](attn_ln, attn_ln, attn_ln, attn_mask=attn_mask)
-            x = x + attn_out
-            ff_ln = layer["ln2"](x)
-            x = x + layer["ff"](ff_ln)
+        with record_function(MODEL_PIPELINE_STEP_LABEL):
+            if self.tok_emb is not None:
+                # x is tokens (B,S) here
+                B, S = x.shape
+                x = self.tok_emb(x) + self.pos_emb[:, :S, :]
+                x = self.drop(x)
+            else:
+                # x is hidden states
+                B, S, _ = x.shape
 
-        # If we own the head, produce logits
-        if self.head is not None:
-            x = self.ln_f(x)
-            x = self.head(x)  # (B,S,V)
-        return x
+            # Run our local block slice (pre-LN decoder with MHA)
+            for layer in self.blocks:
+                attn_ln = layer["ln1"](x)
+                attn_mask = self._causal_mask(S, attn_ln.device, attn_ln.dtype)
+                attn_out, _ = layer["attn"](attn_ln, attn_ln, attn_ln, attn_mask=attn_mask)
+                x = x + attn_out
+                ff_ln = layer["ln2"](x)
+                x = x + layer["ff"](ff_ln)
+
+            # If we own the head, produce logits
+            if self.head is not None:
+                x = self.ln_f(x)
+                x = self.head(x)  # (B,S,V)
+            return x
 
 
 # ---------------------------
@@ -173,10 +175,11 @@ def tokenwise_loss_fn(outputs: torch.Tensor, targets: torch.Tensor) -> torch.Ten
     outputs: (B,S,V) from the last stage
     targets: (B,S) int64 tokens (we'll compute next-token loss by shifting)
     """
-    V = outputs.size(-1)
-    logits = outputs[:, :-1, :].reshape(-1, V)
-    t = targets[:, 1:].reshape(-1)
-    return F.cross_entropy(logits, t)
+    with record_function(MODEL_LOSS_PROFILER_LABEL):
+        V = outputs.size(-1)
+        logits = outputs[:, :-1, :].reshape(-1, V)
+        t = targets[:, 1:].reshape(-1)
+        return F.cross_entropy(logits, t)
 
 
 # ---------------------------
@@ -224,8 +227,8 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
                 dataset,
                 batch_size=conf["batch_size"],
                 shuffle=True,
-                num_workers=2,
-                pin_memory=True,
+                num_workers=0,
+                pin_memory=False,
             )
             it = iter(loader)
         else:
@@ -266,7 +269,8 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
 
         cur_mem = peak_mem = 0.0
         gpu_util = 0
-        token_tputs, sample_tputs, losses = [], [], []
+        avg_step_loss = 0
+        token_tputs, sample_tputs, losses, losses_all_steps = [], [], [], []
         total_tokens = 0
         t0 = time.perf_counter()
 
@@ -298,8 +302,8 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
             # Timers (rank 0)
             if device.type.startswith("cuda") and rank == 0:
                 torch.cuda.synchronize()
-            if rank == 0:
-                t_before = time.perf_counter()
+
+            t_before = time.perf_counter()
 
             # One GPipe training step across all micro-batches
             if rank == 0:
@@ -308,6 +312,7 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
                 schedule.step(target=targets_last, losses=losses)  # computes loss/backward on last stage
             else:
                 schedule.step()  # run pipeline
+            t_step = time.perf_counter() - t_before
 
             # Optimizer step per-stage
             optim.step()
@@ -325,31 +330,41 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
                 if step >= warmup:
                     token_tputs.append(tokens / step_time)
                     sample_tputs.append(samples / step_time)
-                if torch.cuda.is_available():
-                    cur_mem, peak_mem = gpu_memory_allocated()
-                    gpu_util = gpu_utilization_percent()
 
-                if step % 10 == 0 or step == max_steps - 1:
-                    logger.info(
-                        "Training snapshot (GPipe)",
-                        extra={"extra": {
-                            "step": f"{step + 1}/{max_steps}",
-                            "tokens_per_s": f"{(token_tputs[-1] if token_tputs else 0):,.0f}",
-                            "current_gpu_mem_MB": f"{cur_mem:.1f}",
-                            "peak_gpu_mem_MB": f"{peak_mem:.1f}",
-                            "gpu_util_percent": gpu_util,
-                            "balance": balance,
-                            "stage_block_range": [sb, eb],
-                        }}
-                    )
+            if rank == last_rank:
+                avg_step_loss = sum(losses) / len(losses)
+                if step >= warmup:
+                    losses_all_steps.append(avg_step_loss.item())
+                losses.clear()
+
+            cur_mem, peak_mem = gpu_memory_allocated()
+            gpu_util = gpu_utilization_percent()
+            if step % 10 == 0 or step == max_steps - 1:
+                logger.info(
+                    "Training snapshot",
+                    extra={"extra": {
+                        "step": f"{step + 1}/{max_steps}",
+                        "step_time": f"{t_step:.2f}",
+                        "tokens_per_s": f"{(token_tputs[-1] if token_tputs else 0):,.0f}",
+                        "avg_loss": f"{avg_step_loss:.4f}" if rank == last_rank else 0,
+                        "current_gpu_mem_MB": f"{cur_mem:.1f}",
+                        "peak_gpu_mem_MB": f"{peak_mem:.1f}",
+                        "gpu_util_percent": gpu_util,
+                        "balance": balance,
+                        "stage_block_range": [sb, eb],
+                    }}
+                )
 
         # Final metrics
-        if rank == 0:
-            total_time = time.perf_counter() - t0
-            avg_tps = (sum(token_tputs)/len(token_tputs)) if token_tputs else 0
-            avg_sps = (sum(sample_tputs)/len(sample_tputs)) if sample_tputs else 0
-            logger.info(
-                "Training results",
+        total_time = time.perf_counter() - t0
+        avg_tps = (sum(token_tputs)/len(token_tputs)) if token_tputs else 0
+        avg_sps = (sum(sample_tputs)/len(sample_tputs)) if sample_tputs else 0
+        avg_loss = 0
+        if rank == last_rank:
+            avg_loss = sum(losses_all_steps) / len(losses_all_steps)
+
+        logger.info(
+            "Training results",
                 extra={"extra": {
                     "avg_tokens_per_s": avg_tps,
                     "avg_samples_per_s": avg_sps,
@@ -359,24 +374,21 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
                     "peak_gpu_mem_mb": peak_mem,
                     "gpu_util_percent": gpu_util,
                     "balance": balance,
+                    "stage_block_range": [sb, eb],
+                    "avg_loss": avg_loss
                 }}
-            )
+        )
         
         # ---------------------------
         # PROFILER EXAMPLE (mirrors single_gpu)
         # ---------------------------
         steps = 8
-        # choose activities dynamically (CPU-only path avoids CUDA activity)
-        activities = [ProfilerActivity.CPU]
-        if device.type.startswith("cuda"):
-            activities.append(ProfilerActivity.CUDA)
-
         if rank == 0 and it is None:
             # safety, though rank 0 always has a loader
-            it = iter(DataLoader(dataset, batch_size=conf["batch_size"], shuffle=True, num_workers=2, pin_memory=True))
+            it = iter(DataLoader(dataset, batch_size=conf["batch_size"], shuffle=True, num_workers=0, pin_memory=False))
 
         with profile(
-            activities=activities,
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
             profile_memory=True,
             record_shapes=True,
             with_stack=False,
@@ -408,17 +420,16 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
                 optim.zero_grad(set_to_none=True)
 
                 # Profiled pipeline step
-                if rank == 0:
-                    with record_function(MODEL_FORWARD_PROFILER_LABEL):
-                        schedule.step(batch)
-                elif rank == last_rank:
-                    # We nest loss/backward labels around the schedule call.
-                    # (Internally, GPipe will compute per-microbatch loss then backprop.)
-                    with record_function(MODEL_LOSS_PROFILER_LABEL):
-                        with record_function(MODEL_BACKWARD_PROFILER_LABEL):
-                            schedule.step(target=targets_last, losses=None)
-                else:
-                    schedule.step()
+                with record_function(MODEL_PIPELINE_STEP_LABEL):
+                    if rank == 0:
+                        with record_function(MODEL_FORWARD_PROFILER_LABEL):
+                            schedule.step(batch)
+                    elif rank == last_rank:
+                        # We nest loss/backward labels around the schedule call.
+                        # (Internally, GPipe will compute per-microbatch loss then backprop.)
+                        schedule.step(target=targets_last, losses=None)
+                    else:
+                        schedule.step()
 
                 # Optimizer step
                 with record_function(MODEL_OPTIMIZER_PROFILER_LABEL):
@@ -449,7 +460,7 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
 
         # Optional: print a compact table on CPU-only runs like your DDP example
         if device.type == "cpu":
-            print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))
+            print(prof.key_averages().table(sort_by="cpu_time_total"))
 
     finally:
         dist.barrier()
