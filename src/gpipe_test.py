@@ -51,8 +51,7 @@ class SimpleTransformerDecoder(nn.Module):
     def _causal_mask(seq_len, device):
         return torch.triu(torch.full((seq_len, seq_len), float("-inf")), diagonal=1).to(device)
 
-
-device = get_device(force_cpu=True)
+device = get_device()
 conf = CONF['cpu']
 model = SimpleTransformerDecoder(
     conf["vocab_size"],
@@ -71,11 +70,18 @@ import torch.distributed as dist
 from torch.distributed.pipelining import pipeline, ScheduleGPipe, SplitPoint
 
 # Initialize distributed training
-group = dist.init_process_group(backend='gloo')  # or 'gloo' for CPU
+if torch.cuda.is_available():
+    dist.init_process_group(backend='nccl')  # or 'gloo' for CPU
+else:
+    dist.init_process_group(backend='gloo')  # or 'gloo' for CPU
+
 
 # Get rank and world size
 world_size = dist.get_world_size()
 rank = dist.get_rank()
+
+if torch.cuda.is_available():
+    torch.cuda.set_device(rank)
 
 if world_size == 1:
     print("Even on CPU, we need --nporc_per_node > 1")
@@ -93,8 +99,10 @@ split_spec = {
 }
 
 # TODO: we don't use explicitly use conf["batch_size"], we should actually use batch_size / n_microbatches
-# Implied - make sure n_microbatches is divisible evenly by batch_size....
-x = torch.randint(0, conf["vocab_size"], (conf["batch_size"] // 8, conf["seq_len"])) 
+# Implied - make sure n_microbatches is divisible evenly by batch_size....ideally, n_microbatches = 2 * world_size
+conf["batch_size"] = 32
+n_microbatches = 4
+x = torch.randint(0, conf["vocab_size"], (conf["batch_size"] // n_microbatches, conf["seq_len"])) 
 pipe = pipeline(
     module=model,
     mb_args=(x,),
@@ -109,7 +117,7 @@ print(f"[{rank}] {stage.submod}")
 # chunks parameter determines how many microbatches to split the batch into
 # SIMILAR TO ABOVE NOTE: Note: --nproc_per_node=N must have N >= n_layers
 # Number of microbatches must be >= number of stages
-schedule = ScheduleGPipe(stage, 8)
+schedule = ScheduleGPipe(stage, n_microbatches)
 
 # Create optimizer for the pipeline stage
 optimizer = torch.optim.AdamW(stage.submod.parameters(), lr=1e-4)
@@ -129,13 +137,13 @@ for step in range(num_steps):
     # Forward and backward pass through pipeline
     if rank == 0:
         # First stage sends input
-        schedule.step(inputs)
+        schedule.step(inputs.to(device))
     elif rank == world_size - 1:
         # Last stage receives output and calculates loss
         output = schedule.step()
         
         # Reshape for loss calculation: (batch_size * seq_len, vocab_size) and (batch_size * seq_len,)
-        loss = loss_fn(output.view(-1, conf["vocab_size"]), targets.view(-1))
+        loss = loss_fn(output.view(-1, conf["vocab_size"]), targets.view(-1).to(device))
         
         # Backward pass starts from last stage
         loss.backward()
