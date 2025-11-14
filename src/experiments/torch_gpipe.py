@@ -32,8 +32,17 @@ from utils.gpu import (
     reset_peak_mem,
 )
 
-EXPERIMENT_PROFILER_LABELS = []
+EXPERIMENT_PROFILER_LABELS = [
+    "pipeline_step",
+    "model_loss",
+    "model_optimizer",
 
+    # The following are keys provided by the profiler - this gives us a window into how much
+    # comms is going on per stage, which would also allow us to do something like
+    # pipelin_step - (send + recv) = computation time
+    "c10d::send",
+    "c10d::recv_",
+]
 
 def run_torch_gpipe_experiment(model, conf, device, logger):
     if torch.cuda.is_available():
@@ -95,7 +104,7 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
         gpipe_batch_size = conf["batch_size"] // n_microbatches
         init_tensor = torch.randint(
             0, conf["vocab_size"], (gpipe_batch_size, conf["seq_len"])
-        )
+        ).to(device)
         pipe = pipeline(
             module=model,
             mb_args=(init_tensor,),
