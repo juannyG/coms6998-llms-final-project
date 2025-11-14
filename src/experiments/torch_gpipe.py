@@ -93,13 +93,19 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
         # We also need a "starter" tensor for the pipeline to understand what the "type" of arguments it will receive.
         # The `pipeline` method is 
         gpipe_batch_size = conf["batch_size"] // n_microbatches
-        init_tensor = torch.randint(0, conf["vocab_size"], (conf["batch_size"] // n_microbatches, conf["seq_len"])) 
+        init_tensor = torch.randint(0, conf["vocab_size"], (gpipe_batch_size, conf["seq_len"])) 
         pipe = pipeline(
             module=model,
             mb_args=(init_tensor,),
             split_spec=split_spec,
         )
         #print(f"[{rank}]", pipe)
+        
+        """
+        For simplicity, each device is a rank. Gpipe can support more sophosticated staging, but
+        we're not getting into that...not yet at least.
+        """
+        stage = pipe.build_stage(rank, device)
 
         dataset = SyntheticDataset(
             n_samples=10000, seq_len=conf["seq_len"], vocab_size=conf["vocab_size"]
