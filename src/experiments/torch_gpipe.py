@@ -175,10 +175,6 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
 
                 # Backward pass starts from last stage
                 loss.backward()
-
-                if step % 10 == 0:
-                    # TODO: Remove - debugging purposes
-                    print(f"[rank-{rank}] Step {step}, Loss: {loss.item()}")
             else:
                 # Intermediate stages just pass data through
                 schedule.step()
@@ -258,7 +254,63 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
             record_shapes=True,
             with_stack=False,
         ) as prof:
-            pass
+
+            for i in range(steps):
+                try:
+                    batch = next(it)
+                except StopIteration:
+                    it = iter(loader)
+                    batch = next(it)
+                B, S = batch.shape
+                optimizer.zero_grad()
+
+                with record_function("pipeline_step"):
+                    if rank == 0:
+                        # First stage sends input
+                        schedule.step(batch.to(device))
+                    elif rank == world_size - 1:
+                        # Last stage receives output and calculates loss
+                        logits = schedule.step()
+                        logits = (
+                            logits[:, :-1, :].contiguous().view(-1, logits.size(-1))
+                        )  # (B*(S-1), V)
+                        targets = batch[:, 1:].contiguous().view(-1)
+
+                        # Reshape for loss calculation: (batch_size * seq_len, vocab_size) and (batch_size * seq_len,)
+                        with record_function("model_loss"):
+                            loss = loss_fn(logits.to(device), targets.to(device))
+
+                        # Backward pass starts from last stage
+                        loss.backward()
+
+                    else:
+                        # Intermediate stages just pass data through
+                        schedule.step()
+
+                # Update parameters
+                with record_function("model_optimizer"):
+                    optimizer.step()
+
+        profiler_metrics = {
+            "profiler_metrics": [
+                {
+                    "operation": k.key,
+                    "count": k.count,
+                    "cpu_memory_usage": k.cpu_memory_usage,
+                    "cpu_time_total": k.cpu_time_total,
+                    "device_memory_usage": k.device_memory_usage,
+                    "device_time_total": k.device_time_total,
+                    "device_type": str(k.device_type),
+                    "self_cpu_memory_usage": k.self_cpu_memory_usage,
+                    "self_cpu_time_total": k.self_cpu_time_total,
+                    "self_device_time_total": k.self_device_time_total,
+                    "self_device_memory_usage": k.self_device_memory_usage,
+                }
+                for k in prof.key_averages()
+            ]
+        }
+        logger.info("Profiler metrics", extra={"extra": profiler_metrics})
+
     finally:
         dist.barrier()
         dist.destroy_process_group()
