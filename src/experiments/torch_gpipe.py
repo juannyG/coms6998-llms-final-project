@@ -98,7 +98,7 @@ class DecoderStageModule(nn.Module):
           - On the last stage, we return logits (B,S,V). Otherwise we return hidden (B,S,D).
         """
 
-        with record_function(MODEL_FOWRWARD_PROFILER_LABEL):
+        with record_function(MODEL_FORWARD_PROFILER_LABEL):
             if self.tok_emb is not None:
                 # x is tokens (B,S) here
                 B, S = x.shape
