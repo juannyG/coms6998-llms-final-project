@@ -1,3 +1,9 @@
+"""
+When doing distirubted tests on RunPod, I've found that this environment variable prevents
+stalls due to comms. This explicitly sets the peer-to-peer/NCCL comms to occur over NVLink.
+
+export NCCL_P2P_LEVEL=NVL
+"""
 import argparse
 import os
 
