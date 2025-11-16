@@ -197,7 +197,6 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
             gpu_util = gpu_utilization_percent()
             tokens = 0
             samples = 0
-            total_tokens = 0
             if rank == world_size - 1:
                 # When the last rank gets here, the whole model has seen the whole batch across all layers
                 tokens = B * (S - 1)  # tokens processed for training step
