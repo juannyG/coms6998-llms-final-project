@@ -89,7 +89,7 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
         i=2: 'layers.8': SplitPoint.BEGINNING  # Start GPU 2 at layer 8
 
         GPU 0 gets: layers 0, 3 (everything before first split)
-        GPU 1 gets: layers 4, 7 (from layers.4 to next split)  
+        GPU 1 gets: layers 4, 7 (from layers.4 to next split)
         GPU 2 gets: layers 8, 11 (from layers.8 to end)
         """
         decoders_per_rank = (conf["n_layers"] + world_size - 1) // world_size
