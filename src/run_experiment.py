@@ -4,7 +4,7 @@ import os
 import torch
 
 from configs import CONF
-from experiments import single_gpu, torch_ddp, zero
+from experiments import single_gpu, torch_ddp, tensor_parallel, zero
 from models.simple import SimpleTransformerDecoder
 from utils.device import get_device
 from utils.logger import get_logger
@@ -15,8 +15,9 @@ LOG_PATH = os.environ.get("LOG_PATH", os.path.join(CWD, "..", "logs"))
 os.path.join
 EXPERIMENT_TYPES = {
     "single_gpu": single_gpu.run_single_gpu_experiment,
-    "torch_ddp" : torch_ddp.run_torch_ddp_experiment,
-    "zero"       : zero.run_zero_experiment
+    "torch_ddp": torch_ddp.run_torch_ddp_experiment,
+    "tensor_parallel": tensor_parallel.run_tensor_parallel_experiment,
+    "zero": zero.run_zero_experiment,
 }
 
 
@@ -54,14 +55,17 @@ if __name__ == "__main__":
     num_param = sum(p.numel() for p in model.parameters() if p.requires_grad)
     if args.dry_run:
         print(f"Using configuration: {conf}")
-        print(
-            f"Trainable parameters: {num_param}"
-        )
+        print(f"Trainable parameters: {num_param}")
     else:
         logger = get_logger(args.experiment_type, args.model_configuration, LOG_PATH)
         logger.info(
             "Starting experiment",
-            extra={"extra": {"configuration": {k: str(v) for k, v in conf.items()}, "num_param": num_param}},
+            extra={
+                "extra": {
+                    "configuration": {k: str(v) for k, v in conf.items()},
+                    "num_param": num_param,
+                }
+            },
         )
         experiment = EXPERIMENT_TYPES[args.experiment_type]
         experiment(model, conf, device, logger)
