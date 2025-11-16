@@ -10,7 +10,7 @@ import os
 import torch
 
 from configs import CONF
-from experiments import single_gpu, torch_ddp, torch_gpipe
+from experiments import single_gpu, torch_ddp, torch_gpipe, tensor_parallel
 from models.simple import SimpleTransformerDecoder
 from utils.device import get_device
 from utils.logger import get_logger
@@ -22,7 +22,8 @@ os.path.join
 EXPERIMENT_TYPES = {
     "single_gpu": single_gpu.run_single_gpu_experiment,
     "torch_ddp": torch_ddp.run_torch_ddp_experiment,
-    "torch_gpipe": torch_gpipe.run_torch_gpipe_experiment
+    "torch_gpipe": torch_gpipe.run_torch_gpipe_experiment,
+    "tensor_parallel": tensor_parallel.run_tensor_parallel_experiment
 }
 
 

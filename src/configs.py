@@ -3,6 +3,7 @@ import torch
 
 CONF = {
     # Use this configuration if there's HPC congestion and you want feedback quickly
+    # NOTE: Megatron does not work at all with CPU
     "cpu": {
         "vocab_size": 800,
         "d_model": 32,
