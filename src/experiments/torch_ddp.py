@@ -49,7 +49,7 @@ def run_torch_ddp_experiment(model, conf, device, logger):
     if device.type.startswith("cuda"):
         dist.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=180))
         torch.cuda.set_device(device)
-        model = model.to(device)
+        model = model.to(device=device, dtype=conf["dtype"])
         ddp_model = DDP(model, device_ids=[device.index])
     else:
         dist.init_process_group(backend="gloo")
