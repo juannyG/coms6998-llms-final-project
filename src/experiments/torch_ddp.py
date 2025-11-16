@@ -29,14 +29,16 @@ from utils.gpu import (
 MODEL_FORWARD_PROFILER_LABEL = "model_forward"
 MODEL_LOSS_PROFILER_LABEL = "model_loss"
 MODEL_BACKWARD_PROFILER_LABEL = "model_backward"
-MODEL_DDP_PROFILER_LABEL = "ddp_communication"
 MODEL_OPTIMIZER_PROFILER_LABEL = "model_optimizer_step"
 EXPERIMENT_PROFILER_LABELS = [
     MODEL_FORWARD_PROFILER_LABEL,
     MODEL_LOSS_PROFILER_LABEL,
     MODEL_BACKWARD_PROFILER_LABEL,
-    MODEL_DDP_PROFILER_LABEL,
     MODEL_OPTIMIZER_PROFILER_LABEL,
+
+    # This label represents the pytorch "all-reduce" primitive that does comms in DDP
+    # We can take "loss time" - "all-reduce" time to get "loss compute time"
+    "c10d::allreduce_"
 ]
 
 
@@ -190,9 +192,7 @@ def run_torch_ddp_experiment(model, conf, device, logger):
                 with record_function(MODEL_LOSS_PROFILER_LABEL):
                     loss = F.cross_entropy(logits, targets)
                 with record_function(MODEL_BACKWARD_PROFILER_LABEL):
-                    with record_function(MODEL_DDP_PROFILER_LABEL):
-                        # Specifically track a label for all-reduce comms in DDP
-                        loss.backward()
+                    loss.backward()
                 with record_function(MODEL_OPTIMIZER_PROFILER_LABEL):
                     optimizer.step()
 

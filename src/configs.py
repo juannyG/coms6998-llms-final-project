@@ -24,7 +24,7 @@ CONF = {
         "vocab_size": 800,
         "d_model": 32,
         "n_heads": 2,
-        "n_layers": 1,
+        "n_layers": 4,
         "d_ff": 128,
         "seq_len": 32,
         "batch_size": 8,
