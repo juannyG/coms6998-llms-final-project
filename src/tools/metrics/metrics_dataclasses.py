@@ -27,7 +27,7 @@ class TrainingResults(TabularMetric):
     avg_gpu_util_percent: float = 0.0
     model_size_on_device_mb: float = 0.0
     model_param_count_on_device: int = 0
-    memory_efficiency: float = 0.0
+    memory_efficiency_on_device: float = 0.0
 
     def to_dict(self):
         return {
@@ -41,7 +41,7 @@ class TrainingResults(TabularMetric):
             "avg_gpu_util_percent": self.avg_gpu_util_percent,
             "model_size_on_device_mb": self.model_size_on_device_mb,
             "model_param_count_on_device": self.model_param_count_on_device,
-            "memory_efficiency": self.memory_efficiency,
+            "memory_efficiency_on_device": self.memory_efficiency_on_device,
         }
 
     @classmethod
@@ -102,7 +102,7 @@ class TrainingResults(TabularMetric):
             ["Avg GPU Utilization", f"{self.avg_gpu_util_percent:.2f}%"],
             ["Model size in device memory", f"{self.model_size_on_device_mb:.2f} MB"],
             ["Model parameters on device", f"{self.model_param_count_on_device}"],
-            ["Device memory efficiency", f"{100 * self.memory_efficiency:.2f}%"],
+            ["Device memory efficiency", f"{100 * self.memory_efficiency_on_device:.2f}%"],
         ]
         return tabulate(table, headers=["Metric", "Value"], tablefmt="github")
 
