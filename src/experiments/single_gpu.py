@@ -11,6 +11,7 @@ from torch.profiler import profile, record_function, ProfilerActivity
 from torch.utils.data import DataLoader
 
 from datasets.synthetic import SyntheticDataset
+from tools.metrics.metrics_dataclasses import TrainingResults
 from utils.gpu import (
     gpu_memory_allocated,
     gpu_utilization_percent,
@@ -45,10 +46,15 @@ def run_single_gpu_experiment(model, conf, device, logger):
     criterion = nn.CrossEntropyLoss()
 
     model.train()
-    step = total_tokens = 0
-    cur_mem = peak_mem = gpu_util = 0
+    step = 0
+    total_tokens = 0
+    cur_mem = 0
+    peak_mem = 0
+    gpu_util = 0
     token_throughputs = []
     sample_throughputs = []
+    gpu_util_per_step = []
+    gpu_mem_per_step = []
     losses = []
     reset_peak_mem()
     t0 = time.perf_counter()
@@ -93,6 +99,8 @@ def run_single_gpu_experiment(model, conf, device, logger):
 
         cur_mem, peak_mem = gpu_memory_allocated()
         gpu_util = gpu_utilization_percent()
+        gpu_mem_per_step.append(cur_mem)
+        gpu_util_per_step.append(gpu_util)
         if step % 10 == 0 or step == max_steps - 1:
             logger.info(
                 "Training snapshot",
@@ -118,20 +126,40 @@ def run_single_gpu_experiment(model, conf, device, logger):
     )
     avg_loss = sum(losses) / len(losses) if losses else None
 
+    """
+    Why average memory + peak memory?
+    High peak, low average: Memory spikes (pipeline bubbles, gradient accumulation)
+    High peak, high average: Consistently memory-bound (tensor parallelism)
+    Low peak, low average: Memory efficient (good for scaling)
+    """
+    avg_gpu_mem_mb = (
+        sum(gpu_mem_per_step) / len(gpu_mem_per_step) if gpu_mem_per_step else 0
+    )
+    avg_gpu_util_percent = (
+        sum(gpu_util_per_step) / len(gpu_util_per_step) if gpu_util_per_step else 0
+    )
+    model_param_count_on_device = sum(p.numel() for p in model.parameters())
+    model_size_on_device_mb = sum(
+        p.numel() * p.element_size() for p in model.parameters()
+    ) / (1024**2)
+    memory_efficiency = model_size_on_device_mb / peak_mem if peak_mem > 0 else 0
+
+    training_results = TrainingResults(
+        avg_tokens_per_s=avg_tokens_per_s,
+        avg_samples_per_s=avg_samples_per_s,
+        avg_loss=avg_loss,
+        total_tokens=total_tokens,
+        total_time_s=total_time,
+        avg_gpu_mem_mb=avg_gpu_mem_mb,
+        peak_gpu_mem_mb=peak_mem,
+        avg_gpu_util_percent=avg_gpu_util_percent,
+        model_size_on_device_mb=model_size_on_device_mb,
+        model_param_count_on_device=model_param_count_on_device,
+        memory_efficiency=memory_efficiency,
+    )
     logger.info(
         "Training results",
-        extra={
-            "extra": {
-                "avg_tokens_per_s": avg_tokens_per_s,
-                "avg_samples_per_s": avg_samples_per_s,
-                "avg_loss": avg_loss,
-                "total_tokens": total_tokens,
-                "total_time_s": total_time,
-                "cur_gpu_mem_mb": cur_mem,
-                "peak_gpu_mem_mb": peak_mem,
-                "gpu_util_percent": gpu_util,
-            }
-        },
+        extra={"extra": training_results.to_dict()},
     )
 
     # PROFILER EXAMPLE

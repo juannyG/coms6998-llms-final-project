@@ -22,21 +22,42 @@ class TrainingResults(TabularMetric):
     avg_loss: float = 0.0
     total_tokens: int = 0
     total_time_s: float = 0.0
-    total_gpu_mem_mb: float = 0.0
+    avg_gpu_mem_mb: float = 0.0
     peak_gpu_mem_mb: float = 0.0
-    gpu_util_percent: float = 0.0
+    avg_gpu_util_percent: float = 0.0
+    model_size_on_device_mb: float = 0.0
+    model_param_count_on_device: int = 0
+    memory_efficiency: float = 0.0
+
+    def to_dict(self):
+        return {
+            "avg_tokens_per_s": self.avg_tokens_per_s,
+            "avg_samples_per_s": self.avg_samples_per_s,
+            "avg_loss": self.avg_loss,
+            "total_tokens": self.total_tokens,
+            "total_time_s": self.total_time_s,
+            "avg_gpu_mem_mb": self.avg_gpu_mem_mb,
+            "peak_gpu_mem_mb": self.peak_gpu_mem_mb,
+            "avg_gpu_util_percent": self.avg_gpu_util_percent,
+            "model_size_on_device_mb": self.model_size_on_device_mb,
+            "model_param_count_on_device": self.model_param_count_on_device,
+            "memory_efficiency": self.memory_efficiency,
+        }
 
     @classmethod
     def from_dict(cls, d):
         return cls(
-            avg_tokens_per_s=d["avg_tokens_per_s"],
-            avg_samples_per_s=d["avg_samples_per_s"],
-            avg_loss=d["avg_loss"],
-            total_tokens=d["total_tokens"],
-            total_time_s=d["total_time_s"],
-            peak_gpu_mem_mb=d["peak_gpu_mem_mb"],
-            total_gpu_mem_mb=d["peak_gpu_mem_mb"],
-            gpu_util_percent=d.get("gpu_util_percent"),
+            avg_tokens_per_s=d['avg_tokens_per_s'],
+            avg_samples_per_s=d['avg_samples_per_s'],
+            avg_loss=d['avg_loss'],
+            total_tokens=d['total_tokens'],
+            total_time_s=d['total_time_s'],
+            avg_gpu_mem_mb=d['avg_gpu_mem_mb'],
+            peak_gpu_mem_mb=d['peak_gpu_mem_mb'],
+            avg_gpu_util_percent=d['avg_gpu_util_percent'],
+            model_size_on_device_mb=d['model_size_on_device_mb'],
+            model_param_count_on_device=d['model_param_count_on_device'],
+            memory_efficiency=d['memory_efficiency'],
         )
 
     @classmethod
@@ -62,7 +83,6 @@ class TrainingResults(TabularMetric):
             agg.total_tokens += tr.total_tokens
             agg.total_time_s = max(agg.total_time_s, tr.total_time_s)
             agg.peak_gpu_mem_mb = max(agg.peak_gpu_mem_mb, tr.peak_gpu_mem_mb)
-            agg.total_gpu_mem_mb += tr.total_gpu_mem_mb
             agg.gpu_util_percent += tr.gpu_util_percent
 
         # Do the average after the summations
@@ -77,9 +97,12 @@ class TrainingResults(TabularMetric):
             ["Avg Loss", f"{self.avg_loss:.4f}"],
             ["Total Tokens", f"{self.total_tokens:,}"],
             ["Total Time", f"{self.total_time_s:.2f} sec"],
+            ["Avg GPU Mem", f"{self.avg_gpu_mem_mb:.1f} MB"],
             ["Peak GPU Mem", f"{self.peak_gpu_mem_mb:.1f} MB"],
-            ["Total GPU Mem", f"{self.total_gpu_mem_mb:.1f} MB"],
-            ["GPU Utilization", f"{self.gpu_util_percent:.2f}%"],
+            ["Avg GPU Utilization", f"{self.avg_gpu_util_percent:.2f}%"],
+            ["Model size in device memory", f"{self.model_size_on_device_mb:.2f}%"],
+            ["Model parameters on device", f"{self.model_param_count_on_device}"],
+            ["Device memory efficiency", f"{100 * self.memory_efficiency:.2f}%"]
         ]
         return tabulate(table, headers=["Metric", "Value"], tablefmt="github")
 
