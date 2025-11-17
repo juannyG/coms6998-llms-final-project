@@ -3,14 +3,15 @@
 After one or more experiments have been run, here are some scripts to show the results in a 
 more readable fashion than looking through the raw logs.
 
-## summarize_metrics.py
+## summary.py
 
 ```sh 
-usage: summarize_metrics.py [-h] [--files [FILES ...]] [--dir DIR] {training,profiler}
+usage: summary.py [-h] [--files [FILES ...]] [--dir DIR] {training,profiler}
 
-Provide per-device metrics summary in a more concise and readable manner.
+Provide metrics summary for a given level in a more concise and readable manner
 
 positional arguments:
+  {device,experiment}  The type of summary you want produced
   {training,profiler}  The type of metric to extract and summarize.
 
 options:
@@ -21,9 +22,9 @@ options:
 
 ### Examples
 ```sh 
-$ python summarize_metrics.py --files ../path/to/logs/run_single_gpu_10m_cuda_0_1760664637.log -- training
+$ python summary.py --files ../path/to/logs/single_gpu/10m/1760664637/cuda_0.log -- device training
 
-=== Results for experiment: run_single_gpu_10m_cuda_0_1760664637 ===
+=== Results for experiment: single_gpu/10m/1760664637/cuda_0 ===
 | Metric          | Value    |
 |-----------------|----------|
 | Avg Tokens/sec  | 145,976  |
@@ -35,9 +36,9 @@ $ python summarize_metrics.py --files ../path/to/logs/run_single_gpu_10m_cuda_0_
 | GPU Utilization | 83%      |
 
 
-$ python summarize_metrics.py --dir ../../../logs -- profiler
+$ python summary.py --dir ../../../logs -- device profiler
 
-=== Results for experiment: run_single_gpu_10m_cuda_0_1760664637 ===
+=== Results for experiment: single_gpu/10m/1760664637/cuda_0 ===
 | Operation            |   Calls |   CPU Time (ms) |   GPU Time (ms) |   CPU Memory (MB) |   GPU Memory (MB) |
 |----------------------|---------|-----------------|-----------------|-------------------|-------------------|
 | model_forward        |       8 |           43.3  |           68.96 |                 0 |           1817.03 |
