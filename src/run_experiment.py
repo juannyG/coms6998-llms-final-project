@@ -44,6 +44,7 @@ if __name__ == "__main__":
         conf["n_layers"],
         conf["d_ff"],
         conf["seq_len"],
+        conf["dtype"]
     )
 
     num_param = sum(p.numel() for p in model.parameters() if p.requires_grad)
