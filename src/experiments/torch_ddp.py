@@ -63,7 +63,7 @@ def run_torch_ddp_experiment(model, conf, device, logger):
         sampler = DistributedSampler(dataset)
         loader = DataLoader(
             dataset,
-            batch_size=conf["batch_size"],
+            batch_size=conf["batch_size"] // dist.get_world_size(),
             shuffle=False,  # DistributedSampler is mutually exclusive from shuffle
             num_workers=2,
             pin_memory=True,
