@@ -16,7 +16,7 @@ import glob
 from pathlib import Path
 from typing import Any
 
-from experiments import single_gpu, torch_ddp, tensor_parallel
+from experiments import single_gpu, torch_ddp, torch_gpipe, tensor_parallel
 from tools.metrics.experiment_summary import generate_experiment_summary
 from tools.metrics.metrics_dataclasses import TrainingResults, ProfilerSummary
 
@@ -36,6 +36,7 @@ class DeviceSummary:
     EXPERIMENT_PROFILER_OPERATION_LABELS = {
         "single_gpu": single_gpu.EXPERIMENT_PROFILER_LABELS,
         "ddp": torch_ddp.EXPERIMENT_PROFILER_LABELS,
+        "gpipe": torch_gpipe.EXPERIMENT_PROFILER_LABELS,
         "tensor_parallel": tensor_parallel.EXPERIMENT_PROFILER_LABELS,
     }
 
@@ -174,7 +175,9 @@ def main():
     dev_log_iterator = DeviceLogIterator(args.metric_type, all_files)
     if args.level == DEVICE_LEVEL:
         for device_summary in dev_log_iterator:
-            print(f"\n=== Results for experiment: {device_summary.device_experiment} ===")
+            print(
+                f"\n=== Results for experiment: {device_summary.device_experiment} ==="
+            )
             print(device_summary.summary.to_table())
     elif args.level == EXPERIMENT_LEVEL:
         generate_experiment_summary(dev_log_iterator)
