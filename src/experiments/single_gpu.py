@@ -138,10 +138,6 @@ def run_single_gpu_experiment(model, conf, device, logger):
     avg_gpu_util_percent = (
         sum(gpu_util_per_step) / len(gpu_util_per_step) if gpu_util_per_step else 0
     )
-    model_param_count_on_device = sum(p.numel() for p in model.parameters())
-    model_size_on_device_mb = sum(
-        p.numel() * p.element_size() for p in model.parameters()
-    ) / (1024**2)
 
     training_results = TrainingResults(
         avg_tokens_per_s=avg_tokens_per_s,
@@ -152,9 +148,6 @@ def run_single_gpu_experiment(model, conf, device, logger):
         avg_gpu_mem_mb=avg_gpu_mem_mb,
         peak_gpu_mem_mb=peak_mem,
         avg_gpu_util_percent=avg_gpu_util_percent,
-        model_size_on_device_mb=model_size_on_device_mb,
-        model_param_count_on_device=model_param_count_on_device,
-        memory_efficiency_on_device=1, # We're 100% efficient on a single device run!
     )
     logger.info(
         "Training results",

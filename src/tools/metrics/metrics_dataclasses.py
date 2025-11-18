@@ -25,9 +25,6 @@ class TrainingResults(TabularMetric):
     avg_gpu_mem_mb: float = 0.0
     peak_gpu_mem_mb: float = 0.0
     avg_gpu_util_percent: float = 0.0
-    model_size_on_device_mb: float = 0.0
-    model_param_count_on_device: int = 0
-    memory_efficiency_on_device: float = 0.0
 
     def to_dict(self):
         return {
@@ -39,9 +36,6 @@ class TrainingResults(TabularMetric):
             "avg_gpu_mem_mb": self.avg_gpu_mem_mb,
             "peak_gpu_mem_mb": self.peak_gpu_mem_mb,
             "avg_gpu_util_percent": self.avg_gpu_util_percent,
-            "model_size_on_device_mb": self.model_size_on_device_mb,
-            "model_param_count_on_device": self.model_param_count_on_device,
-            "memory_efficiency_on_device": self.memory_efficiency_on_device,
         }
 
     @classmethod
@@ -55,13 +49,11 @@ class TrainingResults(TabularMetric):
             avg_gpu_mem_mb=d["avg_gpu_mem_mb"],
             peak_gpu_mem_mb=d["peak_gpu_mem_mb"],
             avg_gpu_util_percent=d["avg_gpu_util_percent"],
-            model_size_on_device_mb=d["model_size_on_device_mb"],
-            model_param_count_on_device=d["model_param_count_on_device"],
-            memory_efficiency=d["memory_efficiency"],
         )
 
     @classmethod
     def aggregate(cls, training_results):
+        # TODO: MOVE THIS TO A DIFFERENT DATA CLASS
         """
         Produce an aggregate TrainingResults instance based on a list of TrainingResults
 
@@ -100,9 +92,6 @@ class TrainingResults(TabularMetric):
             ["Avg GPU Mem", f"{self.avg_gpu_mem_mb:.1f} MB"],
             ["Peak GPU Mem", f"{self.peak_gpu_mem_mb:.1f} MB"],
             ["Avg GPU Utilization", f"{self.avg_gpu_util_percent:.2f}%"],
-            ["Model size in device memory", f"{self.model_size_on_device_mb:.2f} MB"],
-            ["Model parameters on device", f"{self.model_param_count_on_device}"],
-            ["Device memory efficiency", f"{100 * self.memory_efficiency_on_device:.2f}%"],
         ]
         return tabulate(table, headers=["Metric", "Value"], tablefmt="github")
 
