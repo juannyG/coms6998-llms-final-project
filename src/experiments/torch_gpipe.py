@@ -20,12 +20,12 @@ import time
 import torch
 import torch.nn as nn
 import torch.distributed as dist
-
 from torch.distributed.pipelining import pipeline, SplitPoint, ScheduleGPipe
 from torch.utils.data import DataLoader
 from torch.profiler import profile, record_function, ProfilerActivity
 
 from datasets.synthetic import SyntheticDataset
+from tools.metrics.metrics_dataclasses import TrainingResults
 from utils.gpu import (
     gpu_memory_allocated,
     gpu_utilization_percent,
@@ -143,6 +143,8 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
         gpu_util = 0
         token_throughputs = []
         sample_throughputs = []
+        gpu_util_per_step = []
+        gpu_mem_per_step = []
         losses = []
         reset_peak_mem()
         t0 = time.perf_counter()
@@ -195,6 +197,8 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
 
             cur_mem, peak_mem = gpu_memory_allocated()
             gpu_util = gpu_utilization_percent()
+            gpu_mem_per_step.append(cur_mem)
+            gpu_util_per_step.append(gpu_util)
             tokens = 0
             samples = 0
             if rank == world_size - 1:
@@ -227,6 +231,8 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
         avg_tokens_per_s = 0
         avg_samples_per_s = 0
         avg_loss = 0
+        avg_gpu_mem_mb = 0
+        avg_gpu_util_percent = 0
         if rank == world_size - 1:
             # TODO: Explain why we're only using last rank for these metrics
             avg_tokens_per_s = (
@@ -239,20 +245,26 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
             )
             avg_loss = sum(losses) / len(losses) if losses else None
 
+            avg_gpu_mem_mb = (
+                sum(gpu_mem_per_step) / len(gpu_mem_per_step) if gpu_mem_per_step else 0
+            )
+            avg_gpu_util_percent = (
+                sum(gpu_util_per_step) / len(gpu_util_per_step) if gpu_util_per_step else 0
+            )
+
+        training_results = TrainingResults(
+            avg_tokens_per_s=avg_tokens_per_s,
+            avg_samples_per_s=avg_samples_per_s,
+            avg_loss=avg_loss,
+            total_tokens=total_tokens,
+            total_time_s=total_time,
+            avg_gpu_mem_mb=avg_gpu_mem_mb,
+            peak_gpu_mem_mb=peak_mem,
+            avg_gpu_util_percent=avg_gpu_util_percent,
+        )
         logger.info(
             "Training results",
-            extra={
-                "extra": {
-                    "avg_tokens_per_s": avg_tokens_per_s,
-                    "avg_samples_per_s": avg_samples_per_s,
-                    "avg_loss": avg_loss,
-                    "total_tokens": total_tokens,
-                    "total_time_s": total_time,
-                    "cur_gpu_mem_mb": cur_mem,
-                    "peak_gpu_mem_mb": peak_mem,
-                    "gpu_util_percent": gpu_util,
-                }
-            },
+            extra={"extra": training_results.to_dict()},
         )
         # TODO: Profiler loop
         steps = 8
