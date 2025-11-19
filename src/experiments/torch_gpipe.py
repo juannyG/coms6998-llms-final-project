@@ -71,7 +71,7 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
 
         # TODO: make it configurable, but for now, use ideal n_microbatches = 2 * world_size
         # NOTE: we use world_size as stage count, but more sophisticated setups can mave multiple stages per device
-        n_microbatches = 2 * world_size
+        n_microbatches = world_size
         if n_microbatches < world_size:
             raise Exception(
                 f"Number of microbatches must be >= stage count aka world_size: {n_microbatches} is less than {world_size}"
