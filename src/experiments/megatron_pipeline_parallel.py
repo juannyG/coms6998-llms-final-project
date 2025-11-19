@@ -91,7 +91,7 @@ def forward_step_func(data_iterator, gpt_model):
     return output_tensor, partial(loss_func, loss_mask)
 
 
-def run_tensor_parallel_experiment(_, conf, device, logger):
+def run_pipeline_parallel_experiment(_, conf, device, logger):
     print(f"=== PROCESS STARTING ===")
     print(f"LOCAL_RANK: {os.environ.get('LOCAL_RANK', 'NOT SET')}")
     print(f"WORLD_SIZE: {os.environ.get('WORLD_SIZE', 'NOT SET')}")
