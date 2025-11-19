@@ -57,6 +57,7 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
         if torch.cuda.is_available():
             torch.cuda.set_device(device)
         model.to(device)
+        model.train()
 
         if world_size == 1:
             raise Exception(
@@ -117,6 +118,7 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
         we're not getting into that...not yet at least.
         """
         stage = pipe.build_stage(rank, device)
+        stage.submod.train()
         schedule = ScheduleGPipe(stage, n_microbatches)
 
         dataset = SyntheticDataset(
@@ -245,12 +247,12 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
             )
             avg_loss = sum(losses) / len(losses) if losses else None
 
-            avg_gpu_mem_mb = (
-                sum(gpu_mem_per_step) / len(gpu_mem_per_step) if gpu_mem_per_step else 0
-            )
-            avg_gpu_util_percent = (
-                sum(gpu_util_per_step) / len(gpu_util_per_step) if gpu_util_per_step else 0
-            )
+        avg_gpu_mem_mb = (
+            sum(gpu_mem_per_step) / len(gpu_mem_per_step) if gpu_mem_per_step else 0
+        )
+        avg_gpu_util_percent = (
+            sum(gpu_util_per_step) / len(gpu_util_per_step) if gpu_util_per_step else 0
+        )
 
         training_results = TrainingResults(
             avg_tokens_per_s=avg_tokens_per_s,
