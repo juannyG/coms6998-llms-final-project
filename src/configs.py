@@ -40,7 +40,7 @@ CONF = {
         "n_layers": 4,
         "d_ff": 1536,
         "seq_len": 128,
-        "batch_size": 64, # Reaches 85% GPU util on single GPU run on insominia RTX A6000 - may need to change for other hardware
+        "batch_size": 16,
         "lr": 0.0002,
         "dtype": torch.float32,
         "max_steps": 200,
