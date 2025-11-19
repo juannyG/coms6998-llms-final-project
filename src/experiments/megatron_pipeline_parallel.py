@@ -44,7 +44,7 @@ class MegatronSyntheticDataset(SyntheticDataset):
         # See: https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/datasets/gpt_dataset.py#L645-L661
         return {
             'tokens': tokens,
-            #'attention_mask': torch.tril(torch.ones((self.seq_len, self.seq_len), dtype=torch.bool)).unsqueeze(0),
+            'attention_mask': torch.tril(torch.ones(8, self.seq_len, self.seq_len, dtype=torch.bool)),
             'position_ids': torch.arange(self.seq_len, dtype=torch.long),
             'labels': tokens.clone(), # We need something...so just use the tokens...
             'loss_mask': torch.ones(self.seq_len, dtype=torch.float)
@@ -79,8 +79,8 @@ def forward_step_func(data_iterator, gpt_model):
     device = get_device()
     data = next(data_iterator)
     tokens = data["tokens"].to(device)
-    #attention_mask = data["attention_mask"].to(device)
-    attention_mask = None
+    attention_mask = data["attention_mask"].to(device)
+    #attention_mask = None
     position_ids = data["position_ids"].to(device)
     labels = data["labels"].to(device)
     loss_mask = data["loss_mask"].to(device)
@@ -184,7 +184,7 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
         )
         loader = DataLoader(
             dataset,
-            batch_size=conf["batch_size"],
+            batch_size=conf["batch_size"] // world_size,
             shuffle=True,
             num_workers=0,
             pin_memory=True,
@@ -210,9 +210,9 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
         t0 = time.perf_counter()
         warmup = conf["warmup_steps"]
         max_steps = conf["max_steps"]
-        n_microbatches = 1
-        micro_batch_size = conf["batch_size"]
-        for step in range(5):
+        n_microbatches = world_size
+        micro_batch_size = conf["batch_size"] // n_microbatches
+        for step in range(max_steps):
             optimizer.zero_grad()
             
             torch.cuda.synchronize() if device.type.startswith("cuda") else None
