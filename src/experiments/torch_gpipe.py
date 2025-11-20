@@ -36,13 +36,13 @@ EXPERIMENT_PROFILER_LABELS = [
     "pipeline_step",
     "model_loss",
     "model_optimizer",
-
     # The following are keys provided by the profiler - this gives us a window into how much
     # comms is going on per stage, which would also allow us to do something like
     # pipelin_step - (send + recv) = computation time
     "c10d::send",
     "c10d::recv_",
 ]
+
 
 def run_torch_gpipe_experiment(model, conf, device, logger):
     if torch.cuda.is_available():
@@ -143,14 +143,12 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
         cur_mem = 0
         peak_mem = 0
         gpu_util = 0
-        token_throughputs = []
-        sample_throughputs = []
         gpu_util_per_step = []
         gpu_mem_per_step = []
-        losses = []
+        loss = torch.Tensor([0])
+
         reset_peak_mem()
         t0 = time.perf_counter()
-        warmup = conf["warmup_steps"]
         max_steps = conf["max_steps"]
         it = iter(loader)
         for step in range(max_steps):
@@ -201,17 +199,9 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
             gpu_util = gpu_utilization_percent()
             gpu_mem_per_step.append(cur_mem)
             gpu_util_per_step.append(gpu_util)
-            tokens = 0
-            samples = 0
             if rank == world_size - 1:
                 # When the last rank gets here, the whole model has seen the whole batch across all layers
-                tokens = B * (S - 1)  # tokens processed for training step
-                samples = B
-                total_tokens += tokens
-                if step >= warmup:
-                    token_throughputs.append(tokens / step_time)
-                    sample_throughputs.append(samples / step_time)
-                    losses.append(loss.item())
+                total_tokens += B * (S - 1)
 
             if step % 10 == 0 or step == max_steps - 1:
                 logger.info(
@@ -221,7 +211,6 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
                             "step": f"{step + 1}/{max_steps}",
                             "loss": f"{loss.item():.4f}",
                             "step_time_s": f"{step_time:.4f}",
-                            "tokens_per_s": f"{tokens / step_time:,.0f}",
                             "current_gpu_mem_MB": f"{cur_mem:.1f}",
                             "peak_gpu_mem_MB": f"{peak_mem:.1f}",
                             "gpu_util_percent": gpu_util,
@@ -230,22 +219,11 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
                 )
 
         total_time = time.perf_counter() - t0
-        avg_tokens_per_s = 0
-        avg_samples_per_s = 0
-        avg_loss = 0
+        total_throughput = 0
         avg_gpu_mem_mb = 0
         avg_gpu_util_percent = 0
         if rank == world_size - 1:
-            # TODO: Explain why we're only using last rank for these metrics
-            avg_tokens_per_s = (
-                sum(token_throughputs) / len(token_throughputs) if token_throughputs else 0
-            )
-            avg_samples_per_s = (
-                sum(sample_throughputs) / len(sample_throughputs)
-                if sample_throughputs
-                else 0
-            )
-            avg_loss = sum(losses) / len(losses) if losses else None
+            total_throughput = total_tokens / total_time
 
         avg_gpu_mem_mb = (
             sum(gpu_mem_per_step) / len(gpu_mem_per_step) if gpu_mem_per_step else 0
@@ -255,11 +233,10 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
         )
 
         training_results = TrainingResults(
-            avg_tokens_per_s=avg_tokens_per_s,
-            avg_samples_per_s=avg_samples_per_s,
-            avg_loss=avg_loss,
             total_tokens=total_tokens,
             total_time_s=total_time,
+            total_throughput=total_throughput,
+            final_loss=loss.item(),
             avg_gpu_mem_mb=avg_gpu_mem_mb,
             peak_gpu_mem_mb=peak_mem,
             avg_gpu_util_percent=avg_gpu_util_percent,
@@ -276,7 +253,6 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
             record_shapes=True,
             with_stack=False,
         ) as prof:
-
             for i in range(steps):
                 try:
                     batch = next(it)

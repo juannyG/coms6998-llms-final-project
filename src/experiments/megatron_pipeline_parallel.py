@@ -44,6 +44,7 @@ class MegatronSyntheticDataset(SyntheticDataset):
         # See: https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/datasets/gpt_dataset.py#L645-L661
         return {
             'tokens': tokens,
+            # TODO: This is hardcoded to work for a specific batch size - does't work beyond for conf >=100m
             'attention_mask': torch.tril(torch.ones(8, self.seq_len, self.seq_len, dtype=torch.bool)),
             'position_ids': torch.arange(self.seq_len, dtype=torch.long),
             'labels': tokens.clone(), # We need something...so just use the tokens...
@@ -80,7 +81,6 @@ def forward_step_func(data_iterator, gpt_model):
     data = next(data_iterator)
     tokens = data["tokens"].to(device)
     attention_mask = data["attention_mask"].to(device)
-    #attention_mask = None
     position_ids = data["position_ids"].to(device)
     labels = data["labels"].to(device)
     loss_mask = data["loss_mask"].to(device)
@@ -92,11 +92,6 @@ def forward_step_func(data_iterator, gpt_model):
 
 
 def run_pipeline_parallel_experiment(_, conf, device, logger):
-    print(f"=== PROCESS STARTING ===")
-    print(f"LOCAL_RANK: {os.environ.get('LOCAL_RANK', 'NOT SET')}")
-    print(f"WORLD_SIZE: {os.environ.get('WORLD_SIZE', 'NOT SET')}")
-    print(f"RANK: {os.environ.get('RANK', 'NOT SET')}")
-
     if device.type == "cpu" or not torch.cuda.is_available():
         print("Megatron experiments cannot be run on CPU devices. Exiting...")
         exit(1)
@@ -117,19 +112,14 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
     parallel_state.destroy_model_parallel()
     rank = int(os.environ["LOCAL_RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
-    print(f"=== RANK {rank} of {world_size} STARTING ===")
     torch.cuda.set_device(rank)
-    print(f"Rank {rank}: Set CUDA device to {rank}")
     torch.distributed.init_process_group(
         backend='nccl',
         world_size=world_size,
         rank=rank,
         timeout=datetime.timedelta(seconds=10)
     )
-    print(f"Rank {rank}: Initialized process group")
-    #parallel_state.initialize_model_parallel(tensor_model_parallel_size=world_size)
     parallel_state.initialize_model_parallel(pipeline_model_parallel_size=world_size)
-    print(f"Rank {rank}: Initialized model parallel")
 
     try:
         model_parallel_cuda_manual_seed(123)
@@ -152,34 +142,13 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
             pre_process=(rank == 0),
             post_process=(rank == world_size - 1)
         )
-        print(f"Rank {rank}: Created GPTModel")
         gpt_model.to(device=device, dtype=conf["dtype"])
-        print(f"Rank {rank}: Moved model to device")
-        print(f"Rank {rank}: Model parameters: {sum(p.numel() for p in gpt_model.parameters())}")
-        #print(f"Rank {rank}: Model modules: {list(gpt_model.named_modules())}")
-
-        print(f"Rank {rank}: Pipeline rank = {parallel_state.get_pipeline_model_parallel_rank()}")
-        print(f"Rank {rank}: Pipeline world size = {parallel_state.get_pipeline_model_parallel_world_size()}")
-        print(f"Rank {rank}: Tensor parallel rank = {parallel_state.get_tensor_model_parallel_rank()}")
-
-        print(f"Rank {rank}: Model structure:")
-        for name, module in gpt_model.named_children():
-            param_count = sum(p.numel() for p in module.parameters())
-            print(f"  Rank {rank}: {name} = {param_count} parameters")
-            if hasattr(module, 'layers') and hasattr(module.layers, '__len__'):
-                print(f"    Rank {rank}: {name} has {len(module.layers)} layers")
-
-        # TODO: Remove these...
-        #print(gpt_model)
-        #print(f"Total parameters: {sum(p.numel() for p in gpt_model.parameters())}")
 
         optimizer = Adam(gpt_model.parameters())
-        print(f"Rank {rank}: Created optimizer")
-
 
         dataset = MegatronSyntheticDataset(
-            n_samples=10000, 
-            seq_len=conf["seq_len"], 
+            n_samples=10000,
+            seq_len=conf["seq_len"],
             vocab_size=conf["vocab_size"],
         )
         loader = DataLoader(
@@ -193,7 +162,6 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
         it = iter(loader)
 
         forward_back_func = get_forward_backward_func()
-        print(f"Rank {rank}: Got forward_backward_func: {forward_back_func}")
 
         gpt_model.train()
         step = 0
@@ -201,23 +169,20 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
         cur_mem = 0
         peak_mem = 0
         gpu_util = 0
-        token_throughputs = []
-        sample_throughputs = []
         gpu_util_per_step = []
         gpu_mem_per_step = []
-        losses = []
+        loss = torch.Tensor([0])
+
         reset_peak_mem()
         t0 = time.perf_counter()
-        warmup = conf["warmup_steps"]
         max_steps = conf["max_steps"]
         n_microbatches = world_size
         micro_batch_size = conf["batch_size"] // n_microbatches
         for step in range(max_steps):
             optimizer.zero_grad()
-            
+
             torch.cuda.synchronize() if device.type.startswith("cuda") else None
             t_before = time.perf_counter()
-            print(f"Rank {rank}: syncronized")
 
             losses_reduced = forward_back_func(
                 forward_step_func=forward_step_func,
@@ -229,11 +194,6 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
                 decoder_seq_length=conf["seq_len"],
                 forward_only=False,
             )
-            print(f"Rank {rank}: losses reduced")
-            # TODO: Is this actually necessary for TP?
-            # NOTE: We're not using this here so we can measure pure TP. This would be used if were doing DDP as well...
-            #finalize_model_grads([gpt_model])
-            #print(f"Rank {rank}: finalized model grads")
 
             optimizer.step()
 
@@ -242,24 +202,12 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
 
             # metrics
             step_time = t_after - t_before
-            # We have to do things in a slightly different way, given that the dimensions are buried in the `forward_step_func` closure, but we can still compute tokens based on our parameters...
-            #tokens = B * (S - 1)  # tokens processed for training step
-            #samples = B
-            #total_tokens += tokens
-            micro_batch_size = conf["batch_size"] // world_size
-            seq_length = conf["seq_len"]
-            #num_microbatches = 1
 
             # These are constants, but, whatever - do it each time in the loop...
             # Tweaked computation: Tokens per step = batch_size * (seq_len - 1) * num_microbatches
-            tokens = micro_batch_size * (seq_length - 1) * n_microbatches
-            samples = micro_batch_size * n_microbatches
-            total_tokens += tokens
-            if step >= warmup and rank == world_size - 1:
-                token_throughputs.append(tokens / step_time)
-                sample_throughputs.append(samples / step_time)
-                # TODO: Is it losses_reduced[0] because we're only doing single GPU stuff? Need to check this..
-                losses.append(losses_reduced[0]['loss'].item())
+            if rank == world_size - 1:
+                total_tokens += micro_batch_size * (conf["seq_len"] - 1) * n_microbatches
+                loss = losses_reduced[0]["loss"]
 
             cur_mem, peak_mem = gpu_memory_allocated()
             gpu_util = gpu_utilization_percent()
@@ -271,9 +219,8 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
                     extra={
                         "extra": {
                             "step": f"{step + 1}/{max_steps}",
-                            #"loss": f"{losses_reduced[0]['loss'].item():.4f}",
+                            "loss": f"{losses_reduced[0]['loss'].item():.4f}",
                             "step_time_s": f"{step_time:.4f}",
-                            "tokens_per_s": f"{tokens / step_time:,.0f}",
                             "current_gpu_mem_MB": f"{cur_mem:.1f}",
                             "peak_gpu_mem_MB": f"{peak_mem:.1f}",
                             "gpu_util_percent": gpu_util,
@@ -282,22 +229,12 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
                 )
 
         total_time = time.perf_counter() - t0
-        avg_tokens_per_s = 0
-        avg_samples_per_s = 0
-        avg_loss = 0
+        total_throughput = 0
         avg_gpu_mem_mb = 0
         avg_gpu_util_percent = 0
         if rank == world_size - 1:
             # TODO: Explain why we're only using last rank for these metrics
-            avg_tokens_per_s = (
-                sum(token_throughputs) / len(token_throughputs) if token_throughputs else 0
-            )
-            avg_samples_per_s = (
-                sum(sample_throughputs) / len(sample_throughputs)
-                if sample_throughputs
-                else 0
-            )
-            avg_loss = sum(losses) / len(losses) if losses else None
+            total_throughput = total_tokens / total_time
 
         avg_gpu_mem_mb = (
             sum(gpu_mem_per_step) / len(gpu_mem_per_step) if gpu_mem_per_step else 0
@@ -307,11 +244,10 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
         )
 
         training_results = TrainingResults(
-            avg_tokens_per_s=avg_tokens_per_s,
-            avg_samples_per_s=avg_samples_per_s,
-            avg_loss=avg_loss,
             total_tokens=total_tokens,
             total_time_s=total_time,
+            total_throughput=total_throughput,
+            final_loss=loss.item(),
             avg_gpu_mem_mb=avg_gpu_mem_mb,
             peak_gpu_mem_mb=peak_mem,
             avg_gpu_util_percent=avg_gpu_util_percent,

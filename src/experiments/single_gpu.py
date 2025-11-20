@@ -51,14 +51,12 @@ def run_single_gpu_experiment(model, conf, device, logger):
     cur_mem = 0
     peak_mem = 0
     gpu_util = 0
-    token_throughputs = []
-    sample_throughputs = []
     gpu_util_per_step = []
     gpu_mem_per_step = []
-    losses = []
+    loss = torch.Tensor([0])
+
     reset_peak_mem()
     t0 = time.perf_counter()
-    warmup = conf["warmup_steps"]
     max_steps = conf["max_steps"]
     it = iter(loader)
     for step in range(max_steps):
@@ -89,13 +87,7 @@ def run_single_gpu_experiment(model, conf, device, logger):
 
         # metrics
         step_time = t_after - t_before
-        tokens = B * (S - 1)  # tokens processed for training step
-        samples = B
-        total_tokens += tokens
-        if step >= warmup:
-            token_throughputs.append(tokens / step_time)
-            sample_throughputs.append(samples / step_time)
-            losses.append(loss.item())
+        total_tokens += B * (S - 1)
 
         cur_mem, peak_mem = gpu_memory_allocated()
         gpu_util = gpu_utilization_percent()
@@ -109,7 +101,6 @@ def run_single_gpu_experiment(model, conf, device, logger):
                         "step": f"{step + 1}/{max_steps}",
                         "loss": f"{loss.item():.4f}",
                         "step_time_s": f"{step_time:.4f}",
-                        "tokens_per_s": f"{tokens / step_time:,.0f}",
                         "current_gpu_mem_MB": f"{cur_mem:.1f}",
                         "peak_gpu_mem_MB": f"{peak_mem:.1f}",
                         "gpu_util_percent": gpu_util,
@@ -118,13 +109,7 @@ def run_single_gpu_experiment(model, conf, device, logger):
             )
 
     total_time = time.perf_counter() - t0
-    avg_tokens_per_s = (
-        sum(token_throughputs) / len(token_throughputs) if token_throughputs else 0
-    )
-    avg_samples_per_s = (
-        sum(sample_throughputs) / len(sample_throughputs) if sample_throughputs else 0
-    )
-    avg_loss = sum(losses) / len(losses) if losses else None
+    total_throughput = total_tokens / total_time
 
     """
     Why average memory + peak memory?
@@ -140,11 +125,10 @@ def run_single_gpu_experiment(model, conf, device, logger):
     )
 
     training_results = TrainingResults(
-        avg_tokens_per_s=avg_tokens_per_s,
-        avg_samples_per_s=avg_samples_per_s,
-        avg_loss=avg_loss,
         total_tokens=total_tokens,
         total_time_s=total_time,
+        total_throughput=total_throughput,
+        final_loss=loss.item(),
         avg_gpu_mem_mb=avg_gpu_mem_mb,
         peak_gpu_mem_mb=peak_mem,
         avg_gpu_util_percent=avg_gpu_util_percent,

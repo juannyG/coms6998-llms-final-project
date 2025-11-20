@@ -28,26 +28,30 @@ MODEL_FORWARD_PROFILER_LABEL = "model_forward"
 MODEL_LOSS_PROFILER_LABEL = "model_loss"
 MODEL_FORWARD_BACKWARD_PROFILER_LABEL = "model_forward_backward"
 MODEL_OPTIMIZER_PROFILER_LABEL = "model_optimizer_step"
+MODEL_FINALIZE_GRADIENTS_PROFILER_LABEL = "model_finalize_gradients"
 EXPERIMENT_PROFILER_LABELS = [
     MODEL_FORWARD_PROFILER_LABEL,
     MODEL_LOSS_PROFILER_LABEL,
     MODEL_FORWARD_BACKWARD_PROFILER_LABEL,
     MODEL_OPTIMIZER_PROFILER_LABEL,
+MODEL_FINALIZE_GRADIENTS_PROFILER_LABEL,
 ]
 
 
 class MegatronSyntheticDataset(SyntheticDataset):
     def __getitem__(self, idx):
         tokens = super().__getitem__(idx)
-        
+
         # Create Megatron-expected format
         # See: https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/datasets/gpt_dataset.py#L645-L661
         return {
-            'tokens': tokens,
-            'attention_mask': torch.tril(torch.ones((self.seq_len, self.seq_len), dtype=torch.bool)).unsqueeze(0),
-            'position_ids': torch.arange(self.seq_len, dtype=torch.long),
-            'labels': tokens.clone(), # We need something...so just use the tokens...
-            'loss_mask': torch.ones(self.seq_len, dtype=torch.float)
+            "tokens": tokens,
+            "attention_mask": torch.tril(
+                torch.ones((self.seq_len, self.seq_len), dtype=torch.bool)
+            ).unsqueeze(0),
+            "position_ids": torch.arange(self.seq_len, dtype=torch.long),
+            "labels": tokens.clone(),  # We need something...so just use the tokens...
+            "loss_mask": torch.ones(self.seq_len, dtype=torch.float),
         }
 
 
@@ -113,10 +117,10 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
     world_size = int(os.environ["WORLD_SIZE"])
     torch.cuda.set_device(rank)
     torch.distributed.init_process_group(
-        backend='nccl',
+        backend="nccl",
         world_size=world_size,
         rank=rank,
-        timeout=datetime.timedelta(seconds=30)
+        timeout=datetime.timedelta(seconds=30),
     )
     parallel_state.initialize_model_parallel(tensor_model_parallel_size=world_size)
 
@@ -138,14 +142,14 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
         gpt_model.to(device=device, dtype=conf["dtype"])
 
         # TODO: Remove these...
-        #print(gpt_model)
-        #print(f"Total parameters: {sum(p.numel() for p in gpt_model.parameters())}")
+        # print(gpt_model)
+        # print(f"Total parameters: {sum(p.numel() for p in gpt_model.parameters())}")
 
         optimizer = Adam(gpt_model.parameters())
 
         dataset = MegatronSyntheticDataset(
-            n_samples=10000, 
-            seq_len=conf["seq_len"], 
+            n_samples=10000,
+            seq_len=conf["seq_len"],
             vocab_size=conf["vocab_size"],
         )
         loader = DataLoader(
@@ -165,18 +169,18 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
         cur_mem = 0
         peak_mem = 0
         gpu_util = 0
-        token_throughputs = []
-        sample_throughputs = []
         gpu_util_per_step = []
         gpu_mem_per_step = []
-        losses = []
+        loss = torch.Tensor([0])
+
         reset_peak_mem()
         t0 = time.perf_counter()
-        warmup = conf["warmup_steps"]
         max_steps = conf["max_steps"]
+        n_microbatches = 1
+        micro_batch_size = conf["batch_size"]
         for step in range(max_steps):
             optimizer.zero_grad()
-            
+
             torch.cuda.synchronize() if device.type.startswith("cuda") else None
             t_before = time.perf_counter()
 
@@ -184,14 +188,14 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
                 forward_step_func=forward_step_func,
                 data_iterator=it,
                 model=gpt_model,
-                num_microbatches=1,
+                num_microbatches=n_microbatches,
                 seq_length=conf["seq_len"],
-                micro_batch_size=conf["batch_size"],
+                micro_batch_size=micro_batch_size,
                 decoder_seq_length=conf["seq_len"],
                 forward_only=False,
             )
-            # NOTE: We're not using this here so we can measure pure TP. This would be used if were doing DDP/pipeline as well...
-            # finalize_model_grads([gpt_model])
+            # Need this for TP & DP, but not in play for PP
+            finalize_model_grads([gpt_model])
 
             optimizer.step()
 
@@ -201,23 +205,9 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
             # metrics
             step_time = t_after - t_before
             # We have to do things in a slightly different way, given that the dimensions are buried in the `forward_step_func` closure, but we can still compute tokens based on our parameters...
-            #tokens = B * (S - 1)  # tokens processed for training step
-            #samples = B
-            #total_tokens += tokens
-            micro_batch_size = conf["batch_size"]
-            seq_length = conf["seq_len"]
-            num_microbatches = 1
-
             # These are constants, but, whatever - do it each time in the loop...
-            # Tweaked computation: Tokens per step = batch_size * (seq_len - 1) * num_microbatches
-            tokens = micro_batch_size * (seq_length - 1) * num_microbatches
-            samples = micro_batch_size * num_microbatches
-            total_tokens += tokens
-            if step >= warmup:
-                token_throughputs.append(tokens / step_time)
-                sample_throughputs.append(samples / step_time)
-                # TODO: Is it losses_reduced[0] because we're only doing single GPU stuff? Need to check this..
-                losses.append(losses_reduced[0]['loss'].item())
+            total_tokens += (micro_batch_size * (conf["seq_len"] - 1) * n_microbatches)
+            loss = losses_reduced[0]["loss"]
 
             cur_mem, peak_mem = gpu_memory_allocated()
             gpu_util = gpu_utilization_percent()
@@ -231,7 +221,6 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
                             "step": f"{step + 1}/{max_steps}",
                             "loss": f"{losses_reduced[0]['loss'].item():.4f}",
                             "step_time_s": f"{step_time:.4f}",
-                            "tokens_per_s": f"{tokens / step_time:,.0f}",
                             "current_gpu_mem_MB": f"{cur_mem:.1f}",
                             "peak_gpu_mem_MB": f"{peak_mem:.1f}",
                             "gpu_util_percent": gpu_util,
@@ -240,15 +229,7 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
                 )
 
         total_time = time.perf_counter() - t0
-        avg_tokens_per_s = (
-            sum(token_throughputs) / len(token_throughputs) if token_throughputs else 0
-        )
-        avg_samples_per_s = (
-            sum(sample_throughputs) / len(sample_throughputs)
-            if sample_throughputs
-            else 0
-        )
-        avg_loss = sum(losses) / len(losses) if losses else None
+        total_throughput = total_tokens / total_time
 
         avg_gpu_mem_mb = (
             sum(gpu_mem_per_step) / len(gpu_mem_per_step) if gpu_mem_per_step else 0
@@ -258,11 +239,10 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
         )
 
         training_results = TrainingResults(
-            avg_tokens_per_s=avg_tokens_per_s,
-            avg_samples_per_s=avg_samples_per_s,
-            avg_loss=avg_loss,
             total_tokens=total_tokens,
             total_time_s=total_time,
+            total_throughput=total_throughput,
+            final_loss=loss.item(),
             avg_gpu_mem_mb=avg_gpu_mem_mb,
             peak_gpu_mem_mb=peak_mem,
             avg_gpu_util_percent=avg_gpu_util_percent,
@@ -293,6 +273,8 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
                         decoder_seq_length=conf["seq_len"],
                         forward_only=False,
                     )
+                with record_function(MODEL_FINALIZE_GRADIENTS_PROFILER_LABEL):
+                    finalize_model_grads([gpt_model])
 
                 with record_function(MODEL_OPTIMIZER_PROFILER_LABEL):
                     optimizer.step()
