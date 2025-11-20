@@ -273,8 +273,6 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
                         decoder_seq_length=conf["seq_len"],
                         forward_only=False,
                     )
-                with record_function(MODEL_FINALIZE_GRADIENTS_PROFILER_LABEL):
-                    finalize_model_grads([gpt_model])
 
                 with record_function(MODEL_OPTIMIZER_PROFILER_LABEL):
                     optimizer.step()
