@@ -34,7 +34,7 @@ EXPERIMENT_PROFILER_LABELS = [
     MODEL_LOSS_PROFILER_LABEL,
     MODEL_FORWARD_BACKWARD_PROFILER_LABEL,
     MODEL_OPTIMIZER_PROFILER_LABEL,
-MODEL_FINALIZE_GRADIENTS_PROFILER_LABEL,
+    MODEL_FINALIZE_GRADIENTS_PROFILER_LABEL,
 ]
 
 
@@ -194,8 +194,8 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
                 decoder_seq_length=conf["seq_len"],
                 forward_only=False,
             )
-            # Need this for TP & DP, but not in play for PP
-            finalize_model_grads([gpt_model])
+            # Might need this for DP?
+            #finalize_model_grads([gpt_model])
 
             optimizer.step()
 
@@ -206,7 +206,7 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
             step_time = t_after - t_before
             # We have to do things in a slightly different way, given that the dimensions are buried in the `forward_step_func` closure, but we can still compute tokens based on our parameters...
             # These are constants, but, whatever - do it each time in the loop...
-            total_tokens += (micro_batch_size * (conf["seq_len"] - 1) * n_microbatches)
+            total_tokens += micro_batch_size * (conf["seq_len"] - 1) * n_microbatches
             loss = losses_reduced[0]["loss"]
 
             cur_mem, peak_mem = gpu_memory_allocated()
