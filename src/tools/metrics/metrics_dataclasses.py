@@ -36,6 +36,19 @@ class TrainingResults(TabularMetric):
             "avg_gpu_util_percent": self.avg_gpu_util_percent,
         }
 
+
+    @classmethod
+    def from_dict(cls, d):
+        return cls(
+            total_tokens=d["total_tokens"],
+            total_time_s=d["total_time_s"],
+            total_throughput=d["total_throughput"],
+            final_loss=d["final_loss"],
+            avg_gpu_mem_mb=d["avg_gpu_mem_mb"],
+            peak_gpu_mem_mb=d["peak_gpu_mem_mb"],
+            avg_gpu_util_percent=d["avg_gpu_util_percent"]
+        )
+
     #@classmethod
     #def aggregate(cls, training_results):
     #    # TODO: MOVE THIS TO A DIFFERENT DATA CLASS
