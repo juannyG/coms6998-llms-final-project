@@ -1,6 +1,17 @@
 """
 These dataclasses are meant to act as datamodel schemas for converting our
 different result types into things we can use across aggregation scripts.
+
+
+TODO: Dataclass for scaling efficiences
+    * throughput_scaling_efficiency = (distributed_throughput / single_gpu_throughput) / num_gpus
+    * memory_efficiency = single_gpu_peak_memory / (total_system_peak_memory / num_gpus)
+    * communication_overhead = 1 - (distributed_throughput / (single_gpu_throughput * num_gpus))
+
+Using the profiler data, we can extract comms measurements, extrapolate up to 200 (# of training steps)
+and get
+    * comm_time_percent = total_communication_time / total_step_time
+    * pure_compute_overhead = comm_overhead - comm_time_percent
 """
 
 import abc
@@ -12,7 +23,7 @@ from tabulate import tabulate
 class TabularMetric(abc.ABC):
     @abc.abstractmethod
     def to_table(self):
-        pass
+        return str()
 
 
 @dataclass
@@ -36,7 +47,6 @@ class TrainingResults(TabularMetric):
             "avg_gpu_util_percent": self.avg_gpu_util_percent,
         }
 
-
     @classmethod
     def from_dict(cls, d):
         return cls(
@@ -46,39 +56,8 @@ class TrainingResults(TabularMetric):
             final_loss=d["final_loss"],
             avg_gpu_mem_mb=d["avg_gpu_mem_mb"],
             peak_gpu_mem_mb=d["peak_gpu_mem_mb"],
-            avg_gpu_util_percent=d["avg_gpu_util_percent"]
+            avg_gpu_util_percent=d["avg_gpu_util_percent"],
         )
-
-    #@classmethod
-    #def aggregate(cls, training_results):
-    #    # TODO: MOVE THIS TO A DIFFERENT DATA CLASS
-    #    """
-    #    Produce an aggregate TrainingResults instance based on a list of TrainingResults
-
-    #    Avg tokens/sec per device is summed across devices
-    #    Avg samples/sec per device is summed across devices
-    #    Avg loss per device is averaged across devices - it's going to be the same anyway
-    #    Total tokens per device is summed across devices
-    #    Total time is the maximum across devices
-    #    Peak GPU memory per device is the max across devices
-    #    Total GPU memory per device is summed across devices
-    #    GPU util % per device can be averaged across devices
-    #    """
-
-    #    agg = cls()
-    #    for tr in training_results:
-    #        agg.avg_tokens_per_s += tr.avg_tokens_per_s
-    #        agg.avg_samples_per_s += tr.avg_samples_per_s
-    #        agg.avg_loss += tr.avg_loss
-    #        agg.total_tokens += tr.total_tokens
-    #        agg.total_time_s = max(agg.total_time_s, tr.total_time_s)
-    #        agg.peak_gpu_mem_mb = max(agg.peak_gpu_mem_mb, tr.peak_gpu_mem_mb)
-    #        agg.gpu_util_percent += tr.gpu_util_percent
-
-    #    # Do the average after the summations
-    #    agg.avg_loss /= len(training_results)
-    #    agg.gpu_util_percent /= len(training_results)
-    #    return agg
 
     def to_table(self):
         table = [
@@ -92,6 +71,75 @@ class TrainingResults(TabularMetric):
         ]
         return tabulate(table, headers=["Metric", "Value"], tablefmt="github")
 
+
+class TrainingResultsSummary(TabularMetric):
+    """
+    Aggregate TrainingResults given a particular strategy
+
+    Total tokens
+        * In the case of DDP, all devices see DIFFERENT tokens, so we take the sum
+        * In the case of pipeline parallelism, the last device contains the "total" (the others have 0, so we can still take the sum)
+        * In the case of tensor parallelism, all devices see the SAME tokens, so we choose one
+    Total time is the maximum across devices
+    Total throughput is total tokens / total time
+    Final loss is less important to us, but we'll take the maximum across devices
+    Avergage GPU memory is the average of the averages
+    Total GPU memory is the sum of the averages - gives a sense of general memory requirements
+    Peak GPU memory is the maximum across all the devices
+    Total peak GPU memory - gives a sense of the worst case memory requirements
+    Average GPU utilization is the average of the averages
+    Min average GPU utilization shows load balancing issues
+    """
+
+    def __init__(self, strategy, training_results):
+        self.total_tokens = 0
+        self.total_time_s = 0.0
+        self.total_throughput = 0.0
+        self.final_loss = 0.0
+        self.avg_gpu_mem_mb = 0.0
+        self.total_avg_gpu_mem_mb = 0.0
+        self.peak_gpu_mem_mb = 0.0
+        self.total_peak_gpu_mem_mb = 0.0
+        self.avg_gpu_util_percent = 0.0
+        self.min_avg_gpu_util_percent = 0.0
+
+        self.strategy = strategy
+        self.training_results = training_results
+        self.n_devices = len(training_results)
+        self._create_summary()
+
+    def _create_summary(self):
+        for tr in self.training_results:
+            if self.strategy in ['torch_ddp', 'torch_gpipe', 'megatron_pipeline_parallel']: # TODO: Move these constants, fragile
+                self.total_tokens += tr.total_tokens
+            else:
+                self.total_tokens = max(tr.total_tokens, self.total_tokens)
+            self.total_time_s = max(tr.total_time_s, self.total_time_s)
+            self.final_loss = max(tr.final_loss, self.final_loss)
+            self.total_avg_gpu_mem_mb += tr.avg_gpu_mem_mb
+            self.peak_gpu_mem_mb = max(tr.peak_gpu_mem_mb, self.peak_gpu_mem_mb)
+            self.total_peak_gpu_mem_mb += tr.peak_gpu_mem_mb
+            self.avg_gpu_util_percent += tr.avg_gpu_util_percent
+            self.min_avg_gpu_util_percent = min(tr.avg_gpu_util_percent, self.min_avg_gpu_util_percent or 100)
+        self.total_throughput = self.total_tokens / self.total_time_s
+        self.avg_gpu_mem_mb = self.total_avg_gpu_mem_mb / self.n_devices
+        self.avg_gpu_util_percent /= self.n_devices
+
+    def to_table(self):
+        table = [
+            ["Number of devices", f"{self.n_devices}"],
+            ["Total Tokens", f"{self.total_tokens:,}"],
+            ["Total Time", f"{self.total_time_s:.2f} sec"],
+            ["Total Throughput", f"{self.total_throughput:.2f} tokens/sec"],
+            ["Final Loss", f"{self.final_loss:.4f}"],
+            ["Avg GPU Mem", f"{self.avg_gpu_mem_mb:.1f} MB"],
+            ["Total avg GPU Mem", f"{self.total_avg_gpu_mem_mb:.1f} MB"],
+            ["Peak GPU Mem", f"{self.peak_gpu_mem_mb:.1f} MB"],
+            ["Total peak GPU Mem", f"{self.total_peak_gpu_mem_mb:.1f} MB"],
+            ["Avg GPU Utilization", f"{self.avg_gpu_util_percent:.2f}%"],
+            ["Min avg GPU Utilization", f"{self.min_avg_gpu_util_percent:.2f}%"],
+        ]
+        return tabulate(table, headers=["Metric", "Value"], tablefmt="github")
 
 """
 The torch profiler metrics are a little trickier: we have a list of labels 
