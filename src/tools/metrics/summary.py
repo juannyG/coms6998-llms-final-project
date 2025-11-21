@@ -23,6 +23,8 @@ from torch.types import Device
 
 DEVICE_LEVEL = "device"
 EXPERIMENT_LEVEL = "experiment"
+COMPARISON_LEVEL = "compare"
+LEVELS = [DEVICE_LEVEL, EXPERIMENT_LEVEL, COMPARISON_LEVEL]
 
 
 @dataclass
@@ -94,7 +96,7 @@ def main():
     parser.add_argument(
         "level",
         type=str,
-        choices=[DEVICE_LEVEL, EXPERIMENT_LEVEL],  # TODO: comparison
+        choices=LEVELS,
         help="The type of summary you want produced",
     )
     parser.add_argument("--files", nargs="*", default=[], help="List of files")
@@ -122,14 +124,22 @@ def main():
     dev_log_iterator = DeviceLogIterator(all_files)
     if args.level == DEVICE_LEVEL:
         for device_summary in dev_log_iterator:
-            print(f"\n=== Results for experiment: {device_summary.device_experiment} ===")
+            print(
+                f"\n=== Results for experiment: {device_summary.device_experiment} ==="
+            )
             print(device_summary.training_results.to_table())
     elif args.level == EXPERIMENT_LEVEL:
         summary_by_run_key = generate_experiment_summary(dev_log_iterator)
         for run_key, summary in summary_by_run_key.items():
             print(f"\n=== Aggregated Results for {run_key} ===")
             print(summary.to_table())
+    elif args.level == COMPARISON_LEVEL:
+        # Get the "single_gpu" base lines for the relevant device logs - ASSUMES THERE'S ONLY ONE FOR THE MODEL SIZE
+        # They could be in the dev_log_iterator already or we may need to find it based on the DeviceSummary
 
+        # Get all summaries by run key
+        #summary_by_run_key = generate_experiment_summary(dev_log_iterator)
+        pass
 
 
 if __name__ == "__main__":
