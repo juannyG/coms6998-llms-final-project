@@ -31,16 +31,14 @@ from utils.gpu import (
     gpu_utilization_percent,
     reset_peak_mem,
 )
+from utils.logger import get_log_file_parent_dir
 
 EXPERIMENT_PROFILER_LABELS = [
     "pipeline_step",
     "model_loss",
     "model_optimizer",
-    # The following are keys provided by the profiler - this gives us a window into how much
-    # comms is going on per stage, which would also allow us to do something like
-    # pipelin_step - (send + recv) = computation time
-    "c10d::send",
-    "c10d::recv_",
+
+    "nccl:coalesced",
 ]
 
 
@@ -247,11 +245,22 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
         )
         # TODO: Profiler loop
         steps = 8
+        dir_name = get_log_file_parent_dir(logger)
+        worker_name = f"rank_{dist.get_rank()}"
         with profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-            profile_memory=True,
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            schedule=torch.profiler.schedule(wait=1, warmup=1, active=8, repeat=1),
+            on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                dir_name, worker_name=worker_name
+            ),
             record_shapes=True,
-            with_stack=False,
+            with_stack=True,
+            profile_memory=True,
+            with_flops=True,
+            with_modules=True,
         ) as prof:
             for i in range(steps):
                 try:
@@ -289,25 +298,8 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
                 with record_function("model_optimizer"):
                     optimizer.step()
 
-        profiler_metrics = {
-            "profiler_metrics": [
-                {
-                    "operation": k.key,
-                    "count": k.count,
-                    "cpu_memory_usage": k.cpu_memory_usage,
-                    "cpu_time_total": k.cpu_time_total,
-                    "device_memory_usage": k.device_memory_usage,
-                    "device_time_total": k.device_time_total,
-                    "device_type": str(k.device_type),
-                    "self_cpu_memory_usage": k.self_cpu_memory_usage,
-                    "self_cpu_time_total": k.self_cpu_time_total,
-                    "self_device_time_total": k.self_device_time_total,
-                    "self_device_memory_usage": k.self_device_memory_usage,
-                }
-                for k in prof.key_averages()
-            ]
-        }
-        logger.info("Profiler metrics", extra={"extra": profiler_metrics})
+                prof.step()
+
 
     finally:
         dist.barrier()

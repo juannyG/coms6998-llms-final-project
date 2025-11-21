@@ -44,7 +44,7 @@ class MegatronSyntheticDataset(SyntheticDataset):
         # See: https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/datasets/gpt_dataset.py#L645-L661
         return {
             'tokens': tokens,
-            # TODO: This is hardcoded to work for a specific batch size - does't work beyond for conf >=100m
+            # TODO: This is hardcoded to work for a specific batch size - does't work beyond for conf >=100m - "8" should be the # of attention heads
             'attention_mask': torch.tril(torch.ones(8, self.seq_len, self.seq_len, dtype=torch.bool)),
             'position_ids': torch.arange(self.seq_len, dtype=torch.long),
             'labels': tokens.clone(), # We need something...so just use the tokens...
@@ -257,50 +257,6 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
             extra={"extra": training_results.to_dict()},
         )
 
-        #steps = 8
-        #with profile(
-        #    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-        #    profile_memory=True,
-        #    record_shapes=True,
-        #    with_stack=False,
-        #) as prof:
-        #    for i in range(steps):
-        #        optimizer.zero_grad()
-
-        #        with record_function(MODEL_FORWARD_BACKWARD_PROFILER_LABEL):
-        #            losses_reduced = forward_back_func(
-        #                forward_step_func=forward_step_func,
-        #                data_iterator=it,
-        #                model=gpt_model,
-        #                num_microbatches=1,
-        #                seq_length=conf["seq_len"],
-        #                micro_batch_size=conf["batch_size"],
-        #                decoder_seq_length=conf["seq_len"],
-        #                forward_only=False,
-        #            )
-
-        #        with record_function(MODEL_OPTIMIZER_PROFILER_LABEL):
-        #            optimizer.step()
-
-        #profiler_metrics = {
-        #    "profiler_metrics": [
-        #        {
-        #            "operation": k.key,
-        #            "count": k.count,
-        #            "cpu_memory_usage": k.cpu_memory_usage,
-        #            "cpu_time_total": k.cpu_time_total,
-        #            "device_memory_usage": k.device_memory_usage,
-        #            "device_time_total": k.device_time_total,
-        #            "device_type": str(k.device_type),
-        #            "self_cpu_memory_usage": k.self_cpu_memory_usage,
-        #            "self_cpu_time_total": k.self_cpu_time_total,
-        #            "self_device_time_total": k.self_device_time_total,
-        #            "self_device_memory_usage": k.self_device_memory_usage,
-        #        }
-        #        for k in prof.key_averages()
-        #    ]
-        #}
-        #logger.info("Profiler metrics", extra={"extra": profiler_metrics})
     except Exception as exc:
         print(exc)
         raise exc

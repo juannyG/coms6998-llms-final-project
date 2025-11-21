@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import time
+from pathlib import Path
 
 from utils.device import get_device
 
@@ -41,3 +42,11 @@ def get_logger(exp_type, model_conf, log_path, level=logging.INFO):
     logger.addHandler(handler)
     logger.propagate = False
     return logger
+
+
+def get_log_file_parent_dir(logger):
+    for handler in logger.handlers:
+        if isinstance(handler, logging.FileHandler):
+            log_file_path = Path(handler.baseFilename)
+            return str(log_file_path.parent)
+    raise Exception("Logger has no file")

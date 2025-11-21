@@ -1,6 +1,6 @@
 import collections
 
-from tools.metrics.metrics_dataclasses import ProfilerSummary, ExperimentSummary
+from tools.metrics.metrics_dataclasses import ExperimentSummary
 
 
 def group_by_experiments(device_log_iterator):
@@ -17,9 +17,8 @@ def generate_experiment_summary(device_log_iterator):
         strategy = device_entries[0].strategy
         n_devices = len(device_entries)
         all_training_results = [d.training_results for d in device_entries]
-        all_profile_summaries = [d.profiler_summary for d in device_entries]
 
-        summary = ExperimentSummary(strategy, n_devices, all_training_results, all_profile_summaries)
+        summary = ExperimentSummary(strategy, n_devices, all_training_results)
         summary.build_summary()
 
         print(f"\n=== Aggregated Results for {run_key} ===")

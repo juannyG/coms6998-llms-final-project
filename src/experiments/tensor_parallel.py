@@ -23,6 +23,7 @@ from utils.gpu import (
     gpu_utilization_percent,
     reset_peak_mem,
 )
+from utils.logger import get_log_file_parent_dir
 
 MODEL_FORWARD_PROFILER_LABEL = "model_forward"
 MODEL_LOSS_PROFILER_LABEL = "model_loss"
@@ -253,11 +254,22 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
         )
 
         steps = 8
+        dir_name = get_log_file_parent_dir(logger)
+        worker_name = f"rank_{rank}"
         with profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-            profile_memory=True,
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            schedule=torch.profiler.schedule(wait=1, warmup=1, active=8, repeat=1),
+            on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                dir_name, worker_name=worker_name
+            ),
             record_shapes=True,
-            with_stack=False,
+            with_stack=True,
+            profile_memory=True,
+            with_flops=True,
+            with_modules=True,
         ) as prof:
             for i in range(steps):
                 optimizer.zero_grad()
@@ -277,24 +289,7 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
                 with record_function(MODEL_OPTIMIZER_PROFILER_LABEL):
                     optimizer.step()
 
-        profiler_metrics = {
-            "profiler_metrics": [
-                {
-                    "operation": k.key,
-                    "count": k.count,
-                    "cpu_memory_usage": k.cpu_memory_usage,
-                    "cpu_time_total": k.cpu_time_total,
-                    "device_memory_usage": k.device_memory_usage,
-                    "device_time_total": k.device_time_total,
-                    "device_type": str(k.device_type),
-                    "self_cpu_memory_usage": k.self_cpu_memory_usage,
-                    "self_cpu_time_total": k.self_cpu_time_total,
-                    "self_device_time_total": k.self_device_time_total,
-                    "self_device_memory_usage": k.self_device_memory_usage,
-                }
-                for k in prof.key_averages()
-            ]
-        }
-        logger.info("Profiler metrics", extra={"extra": profiler_metrics})
+                prof.step()
+
     finally:
         torch.distributed.destroy_process_group()

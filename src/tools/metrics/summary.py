@@ -18,7 +18,7 @@ from typing import Any
 
 from experiments import single_gpu, torch_ddp, torch_gpipe, tensor_parallel
 from tools.metrics.experiment_summary import generate_experiment_summary
-from tools.metrics.metrics_dataclasses import TrainingResults, ProfilerSummary
+from tools.metrics.metrics_dataclasses import TrainingResults
 from torch.types import Device
 
 DEVICE_LEVEL = "device"
@@ -27,22 +27,7 @@ EXPERIMENT_LEVEL = "experiment"
 
 @dataclass
 class DeviceSummary:
-    """
-    This provides a mapping of what profiler labels should be included the in the profiler summary
-    based on the type of experiment. For example: ddp_communication is not recorded nor does it make
-    sense to include in the `single_gpu` experiment summary
-    """
-
-    # TODO: Instead of importing these here, flip it around: define the labels here and have the experiments import them
-    EXPERIMENT_PROFILER_OPERATION_LABELS = {
-        "single_gpu": single_gpu.EXPERIMENT_PROFILER_LABELS,
-        "ddp": torch_ddp.EXPERIMENT_PROFILER_LABELS,
-        "gpipe": torch_gpipe.EXPERIMENT_PROFILER_LABELS,
-        "tensor_parallel": tensor_parallel.EXPERIMENT_PROFILER_LABELS,
-    }
-
     TRAINING_RESULTS_LOG_MESSAGE = "Training results"
-    PROFILER_METRICS_LOG_MESSAGE = "Profiler metrics"
 
     path: Path
     device_id: str
@@ -50,7 +35,6 @@ class DeviceSummary:
     model_size: str
     run_id: str
     training_results: TrainingResults
-    profiler_summary: ProfilerSummary
 
     @property
     def experiment_key(self):
@@ -80,31 +64,6 @@ class DeviceLogIterator:
             if training_metrics:
                 training_results = TrainingResults.from_dict(training_metrics)
 
-            operation_labels = []
-            if "single_gpu" in strategy:
-                operation_labels = DeviceSummary.EXPERIMENT_PROFILER_OPERATION_LABELS[
-                    "single_gpu"
-                ]
-            elif "gpipe" in strategy:
-                operation_labels = DeviceSummary.EXPERIMENT_PROFILER_OPERATION_LABELS[
-                    "gpipe"
-                ]
-            elif "ddp" in strategy:
-                operation_labels = DeviceSummary.EXPERIMENT_PROFILER_OPERATION_LABELS[
-                    "ddp"
-                ]
-            elif "tensor_parallel" in strategy:
-                operation_labels = DeviceSummary.EXPERIMENT_PROFILER_OPERATION_LABELS[
-                    "tensor_parallel"
-                ]
-
-            profiler_summary = ProfilerSummary(operation_labels)
-            profiler_metrics = get_metrics(
-                fpath, DeviceSummary.PROFILER_METRICS_LOG_MESSAGE
-            )
-            if profiler_metrics:
-                profiler_summary.update_from_profiler_metrics(profiler_metrics["profiler_metrics"])
-
             yield DeviceSummary(
                 path=fpath,
                 device_id=device_id,
@@ -112,7 +71,6 @@ class DeviceLogIterator:
                 model_size=model_size,
                 run_id=run_id,
                 training_results=training_results,
-                profiler_summary=profiler_summary
             )
 
 
@@ -166,7 +124,6 @@ def main():
         for device_summary in dev_log_iterator:
             print(f"\n=== Results for experiment: {device_summary.device_experiment} ===")
             print(device_summary.training_results.to_table())
-            print(device_summary.profiler_summary.to_table())
     elif args.level == EXPERIMENT_LEVEL:
         generate_experiment_summary(dev_log_iterator)
 
