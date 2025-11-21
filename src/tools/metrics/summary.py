@@ -159,12 +159,14 @@ def main():
             exit(1)
 
         baseline_results = TrainingResults.from_dict(training_metrics)
+        print(f"\n=== Baseline metrics of {strategy}/{model_size}")
+        print(baseline_results.to_table())
+
         summary_by_run_key = generate_experiment_summary(dev_log_iterator)
         for run_key, experiment_summary in summary_by_run_key.items():
             comparison = ComparisonSummmary(baseline_results, experiment_summary)
             print(f"\n=== Comparison Results of {strategy}/{model_size} against {run_key} ({experiment_summary.n_devices} devices) ===")
-            comparison.to_table()
-
+            print(comparison.to_table())
 
 
 if __name__ == "__main__":

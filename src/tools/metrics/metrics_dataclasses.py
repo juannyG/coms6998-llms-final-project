@@ -10,7 +10,7 @@ TODO: Dataclass for scaling efficiences
 """
 
 import abc
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from tabulate import tabulate
 
@@ -124,8 +124,8 @@ class ExperimentSummary(TabularMetric):
         for tr in self.training_results:
             if self.strategy in [
                 "torch_ddp",
-                "torch_gpipe", # See comment why we're summing here
-                "megatron_pipeline_parallel", # See comment why we're summing here
+                "torch_gpipe",  # See comment why we're summing here
+                "megatron_pipeline_parallel",  # See comment why we're summing here
             ]:  # TODO: Move these constants, fragile
                 self.total_tokens += tr.total_tokens
             else:
@@ -160,10 +160,61 @@ class ExperimentSummary(TabularMetric):
         ]
         return tabulate(table, headers=["Metric", "Value"], tablefmt="github")
 
+
 class ComparisonSummmary:
     def __init__(self, baseline_results, experiment_summary):
         self.baseline_results = baseline_results
         self.experiment_summary = experiment_summary
 
     def to_table(self):
-        pass
+        """
+        Given a summary of multiple devices for a specific experiment type and a specific
+        single GPU baseline, calculate
+
+        * Communication overhead: the percentage of time lost to comms overhead
+            (Multi-GPU total_time - Single GPU total_time) / Multi-GPU total_time
+            - we want small %s
+
+        * Throughput Efficiency: what's the speedup factor (percentage)
+            Multi-GPU total throughput / single GPU total throughput
+            - we want big %s (as close to 100% as possible)
+
+        * Memory Efficiency: how much better/worse is the memory usage?
+            Loading...
+        """
+
+        communication_overhead_percent = (
+            (self.experiment_summary.total_time_s - self.baseline_results.total_time_s)
+            / self.experiment_summary.total_time_s
+            * 100
+        )
+
+        # Validation: this should just be (100% - comms overhead)
+        throughput_efficiency_percent = (
+            self.experiment_summary.total_throughput
+            / self.baseline_results.total_throughput
+        ) * 100
+
+        #total_mem_used = self.experiment_summary.avg_gpu_mem_mb
+        #expected_mem_usage = self.baseline_results.avg_gpu_mem_mb
+        #if self.experiment_summary.strategy == "torch_ddp":
+        #    total_mem_used *= self.experiment_summary.n_devices
+        #memory_efficiency_percent = (
+        #    (self.baseline_results.avg_gpu_mem_mb * self.experiment_summary.n_devices)
+        #    / total_mem_used
+        #    * 100
+        #)
+        table = [
+            ["Strategy", self.experiment_summary.strategy],
+            ["Number of Devices", self.experiment_summary.n_devices],
+            ["Total Time", f"{self.experiment_summary.total_time_s:.2f} seconds"],
+            [
+                "Total Throughput",
+                f"{self.experiment_summary.total_throughput:.2f} tokens/sec",
+            ],
+            ["Avg GPU Mem", f"{self.experiment_summary.avg_gpu_mem_mb:.2f} MB"],
+            ["Communication Overhead", f"{communication_overhead_percent:.2f}%"],
+            ["Throughput Efficiency", f"{throughput_efficiency_percent:.2f}%"],
+        #    ["Memory Efficiency", f"{memory_efficiency_percent:.2f}%"],
+        ]
+        return tabulate(table, headers=["Metric", "Value"], tablefmt="github")
