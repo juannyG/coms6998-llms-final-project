@@ -195,15 +195,12 @@ class ComparisonSummmary:
             / self.baseline_results.total_throughput
         ) * 100
 
-        #total_mem_used = self.experiment_summary.avg_gpu_mem_mb
-        #expected_mem_usage = self.baseline_results.avg_gpu_mem_mb
-        #if self.experiment_summary.strategy == "torch_ddp":
-        #    total_mem_used *= self.experiment_summary.n_devices
-        #memory_efficiency_percent = (
-        #    (self.baseline_results.avg_gpu_mem_mb * self.experiment_summary.n_devices)
-        #    / total_mem_used
-        #    * 100
-        #)
+        total_mem_used = self.experiment_summary.avg_gpu_mem_mb
+        if self.experiment_summary.strategy == "torch_ddp":
+            total_mem_used *= self.experiment_summary.n_devices
+        memory_scaling_factor = (
+            total_mem_used / (self.baseline_results.avg_gpu_mem_mb)
+        )
         table = [
             ["Strategy", self.experiment_summary.strategy],
             ["Number of Devices", self.experiment_summary.n_devices],
@@ -213,8 +210,9 @@ class ComparisonSummmary:
                 f"{self.experiment_summary.total_throughput:.2f} tokens/sec",
             ],
             ["Avg GPU Mem", f"{self.experiment_summary.avg_gpu_mem_mb:.2f} MB"],
+            ["Avg GPU Util %", f"{self.experiment_summary.avg_gpu_util_percent:.2f}%"],
             ["Communication Overhead", f"{communication_overhead_percent:.2f}%"],
             ["Throughput Efficiency", f"{throughput_efficiency_percent:.2f}%"],
-        #    ["Memory Efficiency", f"{memory_efficiency_percent:.2f}%"],
+            ["Memory Scaling Factor", f"{memory_scaling_factor:.2f}"],
         ]
         return tabulate(table, headers=["Metric", "Value"], tablefmt="github")
