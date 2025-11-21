@@ -125,7 +125,11 @@ def main():
             print(f"\n=== Results for experiment: {device_summary.device_experiment} ===")
             print(device_summary.training_results.to_table())
     elif args.level == EXPERIMENT_LEVEL:
-        generate_experiment_summary(dev_log_iterator)
+        summary_by_run_key = generate_experiment_summary(dev_log_iterator)
+        for run_key, summary in summary_by_run_key.items():
+            print(f"\n=== Aggregated Results for {run_key} ===")
+            print(summary.to_table())
+
 
 
 if __name__ == "__main__":

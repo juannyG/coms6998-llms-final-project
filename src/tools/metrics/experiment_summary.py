@@ -13,6 +13,7 @@ def group_by_experiments(device_log_iterator):
 def generate_experiment_summary(device_log_iterator):
     grouped = group_by_experiments(device_log_iterator)
 
+    summary_by_run_key = {}
     for run_key, device_entries in grouped.items():
         strategy = device_entries[0].strategy
         n_devices = len(device_entries)
@@ -20,7 +21,5 @@ def generate_experiment_summary(device_log_iterator):
 
         summary = ExperimentSummary(strategy, n_devices, all_training_results)
         summary.build_summary()
-
-        print(f"\n=== Aggregated Results for {run_key} ===")
-        print(summary.to_table())
-
+        summary_by_run_key[run_key] = summary
+    return summary_by_run_key

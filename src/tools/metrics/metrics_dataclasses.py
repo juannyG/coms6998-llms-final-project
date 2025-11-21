@@ -124,8 +124,8 @@ class ExperimentSummary(TabularMetric):
         for tr in self.training_results:
             if self.strategy in [
                 "torch_ddp",
-                "torch_gpipe",
-                "megatron_pipeline_parallel",
+                "torch_gpipe", # See comment why we're summing here
+                "megatron_pipeline_parallel", # See comment why we're summing here
             ]:  # TODO: Move these constants, fragile
                 self.total_tokens += tr.total_tokens
             else:
