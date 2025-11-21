@@ -18,7 +18,7 @@ from typing import Any
 
 from experiments import single_gpu, torch_ddp, torch_gpipe, tensor_parallel
 from tools.metrics.experiment_summary import generate_experiment_summary
-from tools.metrics.metrics_dataclasses import TrainingResults
+from tools.metrics.metrics_dataclasses import ComparisonSummmary, TrainingResults
 from torch.types import Device
 
 DEVICE_LEVEL = "device"
@@ -103,6 +103,9 @@ def main():
     parser.add_argument(
         "--dir", type=str, required=False, help="Directory containing rank JSONL files."
     )
+    parser.add_argument(
+        "--baseline", type=str, required=False, help=""
+    )
     args = parser.parse_args()
 
     if not args.files and not args.dir:
@@ -121,7 +124,7 @@ def main():
             f"No JSONL files found in files: {args.files} / dir: {args.dir}"
         )
 
-    dev_log_iterator = DeviceLogIterator(all_files)
+    dev_log_iterator = list(DeviceLogIterator(all_files))
     if args.level == DEVICE_LEVEL:
         for device_summary in dev_log_iterator:
             print(
@@ -134,12 +137,34 @@ def main():
             print(f"\n=== Aggregated Results for {run_key} ===")
             print(summary.to_table())
     elif args.level == COMPARISON_LEVEL:
-        # Get the "single_gpu" base lines for the relevant device logs - ASSUMES THERE'S ONLY ONE FOR THE MODEL SIZE
-        # They could be in the dev_log_iterator already or we may need to find it based on the DeviceSummary
+        # Nice to have: pull the single gpu run for each strategy's model size dynamically...
+        if not args.baseline:
+            print("ERROR: You must provide a baseline file (--baseline) to compare against")
+            exit(1)
 
-        # Get all summaries by run key
-        #summary_by_run_key = generate_experiment_summary(dev_log_iterator)
-        pass
+        # This should throw execptions if the file does not exist
+        run_path = Path(args.baseline).parent
+        model_size = run_path.parts[-2]
+        strategy = run_path.parts[-3]
+        if strategy != "single_gpu":
+            print(f"ERROR: Baseilne files must be of strategy single_gpu: given {strategy}")
+            exit(1)
+
+        training_results = TrainingResults()
+        training_metrics = get_metrics(
+            args.baseline, DeviceSummary.TRAINING_RESULTS_LOG_MESSAGE
+        )
+        if not training_metrics:
+            print(f"ERROR: No training metrics found in {args.baseilne}")
+            exit(1)
+
+        baseline_results = TrainingResults.from_dict(training_metrics)
+        summary_by_run_key = generate_experiment_summary(dev_log_iterator)
+        for run_key, experiment_summary in summary_by_run_key.items():
+            comparison = ComparisonSummmary(baseline_results, experiment_summary)
+            print(f"\n=== Comparison Results of {strategy}/{model_size} against {run_key} ({experiment_summary.n_devices} devices) ===")
+            comparison.to_table()
+
 
 
 if __name__ == "__main__":

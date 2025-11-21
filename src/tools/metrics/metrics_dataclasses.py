@@ -159,3 +159,11 @@ class ExperimentSummary(TabularMetric):
             ["Communication time", f"{self.communication_time_s:.2f} sec"],
         ]
         return tabulate(table, headers=["Metric", "Value"], tablefmt="github")
+
+class ComparisonSummmary:
+    def __init__(self, baseline_results, experiment_summary):
+        self.baseline_results = baseline_results
+        self.experiment_summary = experiment_summary
+
+    def to_table(self):
+        pass
