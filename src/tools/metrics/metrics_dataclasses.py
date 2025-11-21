@@ -72,9 +72,9 @@ class TrainingResults(TabularMetric):
         return tabulate(table, headers=["Metric", "Value"], tablefmt="github")
 
 
-class TrainingResultsSummary(TabularMetric):
+class ExperimentSummary(TabularMetric):
     """
-    Aggregate TrainingResults given a particular strategy
+    Aggregate TrainingResults and ProfilerSummaries for a particular strategy
 
     Total tokens
         * In the case of DDP, all devices see DIFFERENT tokens, so we take the sum
@@ -89,9 +89,28 @@ class TrainingResultsSummary(TabularMetric):
     Total peak GPU memory - gives a sense of the worst case memory requirements
     Average GPU utilization is the average of the averages
     Min average GPU utilization shows load balancing issues
+
+    For communication time from ProfilerSummary - pick max value across devices. However, it's worth noting:
+    * DDP
+      * all devices do identical all-reduce work
+      * communication happens in parallel, not sequentially
+    * tensor parallel - same rules as DDP
+      * all devices do identical all-reduce (and/or sum + scatter) work
+      * communication happens in parallel, not sequentially
+    * gpipe/pipeline parallelism
+      * Different devices have different communication patterns (send-only, recv-only, send+recv)
+      * System bottleneck = the device with highest communication overhead
     """
 
-    def __init__(self, strategy, training_results):
+    def __init__(
+        self, strategy, n_devices, training_results=None, profiler_results=None
+    ):
+        self.strategy = strategy
+        self.training_results = training_results or []
+        self.profiler_results = profiler_results or []
+        self.n_devices = n_devices
+
+        # Aggregated training results
         self.total_tokens = 0
         self.total_time_s = 0.0
         self.total_throughput = 0.0
@@ -103,14 +122,16 @@ class TrainingResultsSummary(TabularMetric):
         self.avg_gpu_util_percent = 0.0
         self.min_avg_gpu_util_percent = 0.0
 
-        self.strategy = strategy
-        self.training_results = training_results
-        self.n_devices = len(training_results)
-        self._create_summary()
+        # Aggregated comms time, based on profiler data
+        self.communication_time_s = 0.0
 
-    def _create_summary(self):
+    def build_summary(self):
         for tr in self.training_results:
-            if self.strategy in ['torch_ddp', 'torch_gpipe', 'megatron_pipeline_parallel']: # TODO: Move these constants, fragile
+            if self.strategy in [
+                "torch_ddp",
+                "torch_gpipe",
+                "megatron_pipeline_parallel",
+            ]:  # TODO: Move these constants, fragile
                 self.total_tokens += tr.total_tokens
             else:
                 self.total_tokens = max(tr.total_tokens, self.total_tokens)
@@ -120,7 +141,9 @@ class TrainingResultsSummary(TabularMetric):
             self.peak_gpu_mem_mb = max(tr.peak_gpu_mem_mb, self.peak_gpu_mem_mb)
             self.total_peak_gpu_mem_mb += tr.peak_gpu_mem_mb
             self.avg_gpu_util_percent += tr.avg_gpu_util_percent
-            self.min_avg_gpu_util_percent = min(tr.avg_gpu_util_percent, self.min_avg_gpu_util_percent or 100)
+            self.min_avg_gpu_util_percent = min(
+                tr.avg_gpu_util_percent, self.min_avg_gpu_util_percent or 100
+            )
         self.total_throughput = self.total_tokens / self.total_time_s
         self.avg_gpu_mem_mb = self.total_avg_gpu_mem_mb / self.n_devices
         self.avg_gpu_util_percent /= self.n_devices
@@ -138,8 +161,10 @@ class TrainingResultsSummary(TabularMetric):
             ["Total peak GPU Mem", f"{self.total_peak_gpu_mem_mb:.1f} MB"],
             ["Avg GPU Utilization", f"{self.avg_gpu_util_percent:.2f}%"],
             ["Min avg GPU Utilization", f"{self.min_avg_gpu_util_percent:.2f}%"],
+            ["Communication time", f"{self.communication_time_s:.2f} sec"],
         ]
         return tabulate(table, headers=["Metric", "Value"], tablefmt="github")
+
 
 """
 The torch profiler metrics are a little trickier: we have a list of labels 
@@ -151,6 +176,28 @@ Here we need two data classes: one for the operation summary and another to prov
 the map of operation -> operation summary
 """
 
+
+
+"""
+GPIPE
+c10d::send
+c10d::recv_
+nccl:coalesced
+ncclDevKernel_SendRecv
+TODO: does bfloat16 have any extra things?
+
+DDP
+nccl:all_reduce
+ncclDevKernel_AllReduce_Sum_f32_RING_LL <--- what about for bfloat16?
+
+Megatorn Tensor Parallel
+_ReduceFromModelParallelRegion
+c10d::allreduce_
+nccl:all_reduce
+ncclDevKernel_AllReduce_Sum_bf16_RING_LL,  # BFloat16 comms
+ncclDevKernel_AllReduce_Sum_f32_RING_LL,   # Float32 comms
+sum_and_scatter<c10::BFloat16, long>
+"""
 
 @dataclass
 class ProfilerOperationSummary:

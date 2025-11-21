@@ -19,6 +19,7 @@ from typing import Any
 from experiments import single_gpu, torch_ddp, torch_gpipe, tensor_parallel
 from tools.metrics.experiment_summary import generate_experiment_summary
 from tools.metrics.metrics_dataclasses import TrainingResults, ProfilerSummary
+from torch.types import Device
 
 DEVICE_LEVEL = "device"
 EXPERIMENT_LEVEL = "experiment"
@@ -40,21 +41,16 @@ class DeviceSummary:
         "tensor_parallel": tensor_parallel.EXPERIMENT_PROFILER_LABELS,
     }
 
-    TRAINING_RESULTS_METRIC_TYPE = "training"
-    PROFILER_METRICS_TYPE = "profiler"
-    METRICS_MESSAGE_MAP = {
-        # TODO: The values feels fragile - we can probably tighten up the structural connection with the JSONL log files...
-        TRAINING_RESULTS_METRIC_TYPE: "Training results",
-        PROFILER_METRICS_TYPE: "Profiler metrics",
-    }
+    TRAINING_RESULTS_LOG_MESSAGE = "Training results"
+    PROFILER_METRICS_LOG_MESSAGE = "Profiler metrics"
 
     path: Path
     device_id: str
     strategy: str
     model_size: str
     run_id: str
-    metric_type: str
-    summary: Any
+    training_results: TrainingResults
+    profiler_summary: ProfilerSummary
 
     @property
     def experiment_key(self):
@@ -66,8 +62,7 @@ class DeviceSummary:
 
 
 class DeviceLogIterator:
-    def __init__(self, metric_type, files):
-        self.metric_type = metric_type
+    def __init__(self, files):
         self.files = files
 
     def __iter__(self):
@@ -78,37 +73,37 @@ class DeviceLogIterator:
             run_id = run_path.parts[-1]
             device_id = Path(fpath).stem
 
-            metrics = get_metrics(
-                fpath, DeviceSummary.METRICS_MESSAGE_MAP[self.metric_type]
+            training_results = TrainingResults()
+            training_metrics = get_metrics(
+                fpath, DeviceSummary.TRAINING_RESULTS_LOG_MESSAGE
             )
-            if not metrics:
-                continue
+            if training_metrics:
+                training_results = TrainingResults.from_dict(training_metrics)
 
-            device_summary = None
-            if self.metric_type == DeviceSummary.TRAINING_RESULTS_METRIC_TYPE:
-                device_summary = TrainingResults.from_dict(metrics)
-            elif self.metric_type == DeviceSummary.PROFILER_METRICS_TYPE:
-                operation_labels = []
-                if "single_gpu" in strategy:
-                    operation_labels = (
-                        DeviceSummary.EXPERIMENT_PROFILER_OPERATION_LABELS["single_gpu"]
-                    )
-                elif "ddp" in strategy:
-                    operation_labels = (
-                        DeviceSummary.EXPERIMENT_PROFILER_OPERATION_LABELS["ddp"]
-                    )
-                elif "tensor_parallel" in strategy:
-                    operation_labels = (
-                        DeviceSummary.EXPERIMENT_PROFILER_OPERATION_LABELS[
-                            "tensor_parallel"
-                        ]
-                    )
+            operation_labels = []
+            if "single_gpu" in strategy:
+                operation_labels = DeviceSummary.EXPERIMENT_PROFILER_OPERATION_LABELS[
+                    "single_gpu"
+                ]
+            elif "gpipe" in strategy:
+                operation_labels = DeviceSummary.EXPERIMENT_PROFILER_OPERATION_LABELS[
+                    "gpipe"
+                ]
+            elif "ddp" in strategy:
+                operation_labels = DeviceSummary.EXPERIMENT_PROFILER_OPERATION_LABELS[
+                    "ddp"
+                ]
+            elif "tensor_parallel" in strategy:
+                operation_labels = DeviceSummary.EXPERIMENT_PROFILER_OPERATION_LABELS[
+                    "tensor_parallel"
+                ]
 
-                profiler_summary = ProfilerSummary(operation_labels=operation_labels)
-                profiler_summary.update_from_profiler_metrics(
-                    metrics["profiler_metrics"]
-                )
-                device_summary = profiler_summary
+            profiler_summary = ProfilerSummary(operation_labels)
+            profiler_metrics = get_metrics(
+                fpath, DeviceSummary.PROFILER_METRICS_LOG_MESSAGE
+            )
+            if profiler_metrics:
+                profiler_summary.update_from_profiler_metrics(profiler_metrics["profiler_metrics"])
 
             yield DeviceSummary(
                 path=fpath,
@@ -116,8 +111,8 @@ class DeviceLogIterator:
                 strategy=strategy,
                 model_size=model_size,
                 run_id=run_id,
-                metric_type=self.metric_type,
-                summary=device_summary,
+                training_results=training_results,
+                profiler_summary=profiler_summary
             )
 
 
@@ -144,12 +139,6 @@ def main():
         choices=[DEVICE_LEVEL, EXPERIMENT_LEVEL],  # TODO: comparison
         help="The type of summary you want produced",
     )
-    parser.add_argument(
-        "metric_type",
-        type=str,
-        choices=list(DeviceSummary.METRICS_MESSAGE_MAP.keys()),
-        help="The type of metric to extract and summarize.",
-    )
     parser.add_argument("--files", nargs="*", default=[], help="List of files")
     parser.add_argument(
         "--dir", type=str, required=False, help="Directory containing rank JSONL files."
@@ -172,13 +161,12 @@ def main():
             f"No JSONL files found in files: {args.files} / dir: {args.dir}"
         )
 
-    dev_log_iterator = DeviceLogIterator(args.metric_type, all_files)
+    dev_log_iterator = DeviceLogIterator(all_files)
     if args.level == DEVICE_LEVEL:
         for device_summary in dev_log_iterator:
-            print(
-                f"\n=== Results for experiment: {device_summary.device_experiment} ==="
-            )
-            print(device_summary.summary.to_table())
+            print(f"\n=== Results for experiment: {device_summary.device_experiment} ===")
+            print(device_summary.training_results.to_table())
+            print(device_summary.profiler_summary.to_table())
     elif args.level == EXPERIMENT_LEVEL:
         generate_experiment_summary(dev_log_iterator)
 
