@@ -1,0 +1,115 @@
+import torch
+import torch.nn as nn
+
+from configs import CONF
+from models.simple import SimpleTransformerDecoder
+from utils.device import get_device
+
+device = get_device(force_cpu=True)
+conf = CONF['cpu']
+model = SimpleTransformerDecoder(
+    conf["vocab_size"],
+    conf["d_model"],
+    2,
+    6, # Note: --nproc_per_node=N must have N >= n_layers
+    conf["d_ff"],
+    conf["seq_len"],
+)
+
+##### Startin gpipe stuff
+
+# See: huggingface GPT2 gpipe example: https://github.com/pytorch/PiPPy/blob/main/examples/huggingface/pippy_gpt2.py
+import os
+import torch.distributed as dist
+from torch.distributed.pipelining import pipeline, ScheduleGPipe, SplitPoint
+
+# Initialize distributed training
+if torch.cuda.is_available():
+    dist.init_process_group(backend='nccl')  # or 'gloo' for CPU
+else:
+    dist.init_process_group(backend='gloo')  # or 'gloo' for CPU
+
+
+# Get rank and world size
+world_size = dist.get_world_size()
+rank = dist.get_rank()
+
+if torch.cuda.is_available():
+    torch.cuda.set_device(rank)
+
+if world_size == 1:
+    print("Even on CPU, we need --nporc_per_node > 1")
+    exit(1)
+
+if rank == 0:
+    print(conf)
+    print(model)
+
+decoders_per_rank = (conf["n_layers"] + world_size - 1) // world_size
+print(f"[{rank}]: decoders_per_rank = {decoders_per_rank}")
+split_spec = {
+    f'layers.{i * decoders_per_rank}': SplitPoint.BEGINNING
+    for i in range(1, world_size)
+}
+
+# TODO: we don't use explicitly use conf["batch_size"], we should actually use batch_size / n_microbatches
+# Implied - make sure n_microbatches is divisible evenly by batch_size....ideally, n_microbatches = 2 * world_size
+conf["batch_size"] = 32
+n_microbatches = 4
+x = torch.randint(0, conf["vocab_size"], (conf["batch_size"] // n_microbatches, conf["seq_len"])) 
+pipe = pipeline(
+    module=model,
+    mb_args=(x,),
+    split_spec=split_spec,
+)
+print(f"[{rank}]", pipe)
+
+stage = pipe.build_stage(rank, device)
+print(f"[{rank}] {stage.submod}")
+
+# Create GPipe scheduler
+# chunks parameter determines how many microbatches to split the batch into
+# SIMILAR TO ABOVE NOTE: Note: --nproc_per_node=N must have N >= n_layers
+# Number of microbatches must be >= number of stages
+schedule = ScheduleGPipe(stage, n_microbatches)
+
+# Create optimizer for the pipeline stage
+optimizer = torch.optim.AdamW(stage.submod.parameters(), lr=1e-4)
+# Calculate loss (cross-entropy for language modeling)
+loss_fn = nn.CrossEntropyLoss()
+
+# Training loop
+num_steps = 100
+for step in range(num_steps):
+    optimizer.zero_grad()
+    
+    # Prepare input and target
+    # For language modeling, target is typically input shifted by 1
+    inputs = torch.randint(0, conf["vocab_size"], (conf["batch_size"], conf["seq_len"]))
+    targets = torch.randint(0, conf["vocab_size"], (conf["batch_size"], conf["seq_len"]))
+    
+    # Forward and backward pass through pipeline
+    if rank == 0:
+        # First stage sends input
+        schedule.step(inputs.to(device))
+    elif rank == world_size - 1:
+        # Last stage receives output and calculates loss
+        output = schedule.step()
+        
+        # Reshape for loss calculation: (batch_size * seq_len, vocab_size) and (batch_size * seq_len,)
+        loss = loss_fn(output.view(-1, conf["vocab_size"]), targets.view(-1).to(device))
+        
+        # Backward pass starts from last stage
+        loss.backward()
+        
+        if step % 10 == 0:
+            print(f"Step {step}, Loss: {loss.item()}")
+    else:
+        # Intermediate stages just pass data through
+        schedule.step()
+    
+    # Update parameters
+    optimizer.step()
+
+# Cleanup
+dist.destroy_process_group()
