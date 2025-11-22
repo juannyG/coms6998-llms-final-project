@@ -10,7 +10,7 @@ import os
 import torch
 
 from configs import CONF
-from experiments import single_gpu, torch_ddp, torch_gpipe, tensor_parallel, megatron_pipeline_parallel
+from experiments import single_gpu, torch_ddp, torch_gpipe, tensor_parallel, megatron_pipeline_parallel, megatron_ddp
 from models.simple import SimpleTransformerDecoder
 from utils.device import get_device
 from utils.logger import get_logger
@@ -25,6 +25,7 @@ EXPERIMENT_TYPES = {
     "torch_gpipe": torch_gpipe.run_torch_gpipe_experiment,
     "tensor_parallel": tensor_parallel.run_tensor_parallel_experiment,
     "megatron_pipeline_parallel": megatron_pipeline_parallel.run_pipeline_parallel_experiment,
+    "megatron_ddp": megatron_ddp.run_megatron_data_parallel_experiment,
 }
 
 
