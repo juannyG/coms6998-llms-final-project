@@ -4,9 +4,11 @@ summaries of different type of measurements from our experiments at different
 levels of aggregation.
 
 Usage:
-    python tools/metrics/summary.py device training --dir ../logs/
+    python tools/metrics/summary.py device --dir ../logs/
 
-    python tools/metrics/summary.py experiment profiler --files ../logs/single_gpu/10m/1234567890/*
+    python tools/metrics/summary.py experiment --files ../logs/single_gpu/10m/1234567890/*
+
+    python tools/metrics/summary.py compare --baseline ../logs/single_gpu/100m/7890123456/cuda_0.log--files ../logs/torch_ddp/100m/1234567890/
 """
 
 import argparse
