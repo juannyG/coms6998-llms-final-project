@@ -300,7 +300,6 @@ def run_torch_gpipe_experiment(model, conf, device, logger):
 
                 prof.step()
 
-
     finally:
         dist.barrier()
         dist.destroy_process_group()
