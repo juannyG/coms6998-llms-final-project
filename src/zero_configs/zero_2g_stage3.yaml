@@ -11,9 +11,9 @@ zero_optimization:
   overlap_comm: true
   contiguous_gradients: true
   reduce_scatter: true
-  stage3_max_live_parameters: 1e9         # leave roomy unless you tune
-  stage3_max_reuse_distance: 1e9
-  stage3_param_persistence_threshold: 1e5
+  stage3_max_live_parameters: 1000000000         # leave roomy unless you tune
+  stage3_max_reuse_distance: 1000000000
+  stage3_param_persistence_threshold: 100000
   reduce_bucket_size: 50000000
   allgather_bucket_size: 50000000
 
