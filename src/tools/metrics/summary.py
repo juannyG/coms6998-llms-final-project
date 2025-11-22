@@ -148,9 +148,10 @@ def main():
         run_path = Path(args.baseline).parent
         model_size = run_path.parts[-2]
         strategy = run_path.parts[-3]
-        if strategy != "single_gpu":
-            print(f"ERROR: Baseilne files must be of strategy single_gpu: given {strategy}")
-            exit(1)
+        # TODO: With megatron - we can run the "tensor_parallel" experiment with nprocs=1 and get a "single GPU" baseline
+        #if strategy != "single_gpu":
+        #    print(f"ERROR: Baseilne files must be of strategy single_gpu: given {strategy}")
+        #    exit(1)
 
         training_results = TrainingResults()
         training_metrics = get_metrics(
