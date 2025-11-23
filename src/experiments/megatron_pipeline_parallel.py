@@ -38,7 +38,8 @@ EXPERIMENT_PROFILER_LABELS = [
 
 
 class MegatronSyntheticDataset(SyntheticDataset):
-    def __init_(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.num_attention_heads = kwargs.get('num_attention_heads', 0)
 
     def __getitem__(self, idx):
@@ -223,7 +224,7 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
                     extra={
                         "extra": {
                             "step": f"{step + 1}/{max_steps}",
-                            "loss": f"{losses_reduced[0]['loss'].item():.4f}",
+                            "loss": f"{loss.item():.4f}",
                             "step_time_s": f"{step_time:.4f}",
                             "current_gpu_mem_MB": f"{cur_mem:.1f}",
                             "peak_gpu_mem_MB": f"{peak_mem:.1f}",
@@ -278,24 +279,25 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
             with_flops=True,
             with_modules=True,
         ) as prof:
-            optimizer.zero_grad()
+            for i in range(steps):
+                optimizer.zero_grad()
 
-            with record_function(MODEL_FORWARD_BACKWARD_PROFILER_LABEL):
-                losses_reduced = forward_back_func(
-                    forward_step_func=forward_step_func,
-                    data_iterator=it,
-                    model=gpt_model,
-                    num_microbatches=n_microbatches,
-                    micro_batch_size=micro_batch_size,
-                    seq_length=conf["seq_len"],
-                    decoder_seq_length=conf["seq_len"],
-                    forward_only=False,
-                )
+                with record_function(MODEL_FORWARD_BACKWARD_PROFILER_LABEL):
+                    losses_reduced = forward_back_func(
+                        forward_step_func=forward_step_func,
+                        data_iterator=it,
+                        model=gpt_model,
+                        num_microbatches=n_microbatches,
+                        micro_batch_size=micro_batch_size,
+                        seq_length=conf["seq_len"],
+                        decoder_seq_length=conf["seq_len"],
+                        forward_only=False,
+                    )
 
-            with record_function(MODEL_OPTIMIZER_PROFILER_LABEL):
-                optimizer.step()
+                with record_function(MODEL_OPTIMIZER_PROFILER_LABEL):
+                    optimizer.step()
 
-            prof.step()
+                prof.step()
     except Exception as exc:
         print(exc)
         raise exc
