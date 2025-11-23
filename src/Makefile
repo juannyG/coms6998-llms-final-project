@@ -6,7 +6,8 @@ PP_EXPERIMENT=megatron_pipeline_parallel # STILL NEEDS PROFILER ADDITION
 TP_EXPERIMENT=tensor_parallel
 #ZERO_EXPERIMENT=zero
 
-# Default: run everything
+.NOTPARALLEL:
+.PHONY: all single tp ddp pp zero
 all: single ddp tp pp zero
 
 clean:
