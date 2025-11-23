@@ -117,9 +117,6 @@ class ExperimentSummary(TabularMetric):
         self.avg_gpu_util_percent = 0.0
         self.min_avg_gpu_util_percent = 0.0
 
-        # Aggregated comms time, based on profiler data
-        self.communication_time_s = 0.0
-
     def build_summary(self):
         for tr in self.training_results:
             if self.strategy in [
@@ -156,7 +153,6 @@ class ExperimentSummary(TabularMetric):
             ["Total peak GPU Mem", f"{self.total_peak_gpu_mem_mb:.1f} MB"],
             ["Avg GPU Utilization", f"{self.avg_gpu_util_percent:.2f}%"],
             ["Min avg GPU Utilization", f"{self.min_avg_gpu_util_percent:.2f}%"],
-            ["Communication time", f"{self.communication_time_s:.2f} sec"],
         ]
         return tabulate(table, headers=["Metric", "Value"], tablefmt="github")
 
@@ -171,7 +167,7 @@ class ComparisonSummmary:
         Given a summary of multiple devices for a specific experiment type and a specific
         single GPU baseline, calculate
 
-        * Communication overhead: the percentage of time lost to comms overhead
+        * Distributed Training Overhead: everything the training strategy adds relative to single GPU
             (Multi-GPU total_time - Single GPU total_time) / Multi-GPU total_time
             - we want small %s
 
@@ -183,7 +179,7 @@ class ComparisonSummmary:
             Loading...
         """
 
-        communication_overhead_percent = (
+        distributed_training_overhead = (
             (self.experiment_summary.total_time_s - self.baseline_results.total_time_s)
             / self.experiment_summary.total_time_s
             * 100
@@ -211,7 +207,7 @@ class ComparisonSummmary:
             ],
             ["Avg GPU Mem", f"{self.experiment_summary.avg_gpu_mem_mb:.2f} MB"],
             ["Avg GPU Util %", f"{self.experiment_summary.avg_gpu_util_percent:.2f}%"],
-            ["Communication Overhead", f"{communication_overhead_percent:.2f}%"],
+            ["Distributed Training Overhead", f"{distributed_training_overhead:.2f}%"],
             ["Throughput Efficiency", f"{throughput_efficiency_percent:.2f}%"],
             ["Memory Scaling Factor", f"{memory_scaling_factor:.2f}"],
         ]
