@@ -23,6 +23,7 @@ from utils.gpu import (
     gpu_utilization_percent,
     reset_peak_mem,
 )
+from utils.logger import get_log_file_parent_dir
 
 MODEL_FORWARD_PROFILER_LABEL = "model_forward"
 MODEL_LOSS_PROFILER_LABEL = "model_loss"
@@ -37,6 +38,9 @@ EXPERIMENT_PROFILER_LABELS = [
 
 
 class MegatronSyntheticDataset(SyntheticDataset):
+    def __init_(self, *args, **kwargs):
+        self.num_attention_heads = kwargs.get('num_attention_heads', 0)
+
     def __getitem__(self, idx):
         tokens = super().__getitem__(idx)
         
@@ -44,8 +48,7 @@ class MegatronSyntheticDataset(SyntheticDataset):
         # See: https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/datasets/gpt_dataset.py#L645-L661
         return {
             'tokens': tokens,
-            # TODO: This is hardcoded to work for a specific batch size - does't work beyond for conf >=100m - "8" should be the # of attention heads
-            'attention_mask': torch.tril(torch.ones(8, self.seq_len, self.seq_len, dtype=torch.bool)),
+            'attention_mask': torch.tril(torch.ones(self.num_attention_heads, self.seq_len, self.seq_len, dtype=torch.bool)),
             'position_ids': torch.arange(self.seq_len, dtype=torch.long),
             'labels': tokens.clone(), # We need something...so just use the tokens...
             'loss_mask': torch.ones(self.seq_len, dtype=torch.float)
@@ -150,6 +153,7 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
             n_samples=10000,
             seq_len=conf["seq_len"],
             vocab_size=conf["vocab_size"],
+            num_attention_heads=conf["n_heads"]
         )
         loader = DataLoader(
             dataset,
@@ -256,7 +260,42 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
             "Training results",
             extra={"extra": training_results.to_dict()},
         )
+        steps = 8
+        dir_name = get_log_file_parent_dir(logger)
+        worker_name = f"rank_{rank}"
+        with profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            schedule=torch.profiler.schedule(wait=1, warmup=1, active=8, repeat=1),
+            on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                dir_name, worker_name=worker_name
+            ),
+            record_shapes=True,
+            with_stack=True,
+            profile_memory=True,
+            with_flops=True,
+            with_modules=True,
+        ) as prof:
+            optimizer.zero_grad()
 
+            with record_function(MODEL_FORWARD_BACKWARD_PROFILER_LABEL):
+                losses_reduced = forward_back_func(
+                    forward_step_func=forward_step_func,
+                    data_iterator=it,
+                    model=gpt_model,
+                    num_microbatches=n_microbatches,
+                    micro_batch_size=micro_batch_size,
+                    seq_length=conf["seq_len"],
+                    decoder_seq_length=conf["seq_len"],
+                    forward_only=False,
+                )
+
+            with record_function(MODEL_OPTIMIZER_PROFILER_LABEL):
+                optimizer.step()
+
+            prof.step()
     except Exception as exc:
         print(exc)
         raise exc
