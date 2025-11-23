@@ -143,11 +143,18 @@ metrics_tp: \
 	metrics_tp_500m \
 	metrics_tp_1b
 
-metrics_tp_%:
-	python tools/metrics/summary.py compare --baseline $(LOG_PATH)/single_gpu/$*/*/cuda_0.log --dir $(LOG_PATH)/tensor_parallel/$*
+metrics_pp: \
+	metrics_pp_10m \
+	metrics_pp_100m \
+	metrics_pp_300m \
+	metrics_pp_500m \
+	metrics_pp_1b
 
 metrics_ddp_%:
 	python tools/metrics/summary.py compare --baseline $(LOG_PATH)/single_gpu/$*/*/cuda_0.log --dir $(LOG_PATH)/megatron_ddp/$*
+
+metrics_tp_%:
+	python tools/metrics/summary.py compare --baseline $(LOG_PATH)/single_gpu/$*/*/cuda_0.log --dir $(LOG_PATH)/tensor_parallel/$*
 
 metrics_pp_%:
 	python tools/metrics/summary.py compare --baseline $(LOG_PATH)/single_gpu/$*/*/cuda_0.log --dir $(LOG_PATH)/megatron_pipeline_parallel/$*
