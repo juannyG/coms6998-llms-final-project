@@ -52,3 +52,5 @@ source .bashrc
 setup_venv
 ```
 This will put you in the repo directory with virtualenv already activated.
+
+# TODO: How to run using Makefile
