@@ -36,46 +36,62 @@ $ python summary.py --files ../path/to/logs/single_gpu/10m/1760664637/cuda_0.log
 | Avg GPU Utilization | 51.69%              |
 
 
-$ python summary.py compare \
- --baseline ../path/to/logs/single_gpu/10m/1763603317/cuda_0.log \
- --dir ../path/to/logs/torch_ddp/10m
+$ python tools/metrics/summary.py experiment --dir ../logs/tensor_parallel/10m/1763908350/
+
+=== Aggregated Results for tensor_parallel/10m/1763908350 ===
+| Metric                  | Value               |
+|-------------------------|---------------------|
+| Number of devices       | 2                   |
+| Total Tokens            | 406,400             |
+| Total Time              | 5.05 sec            |
+| Total Throughput        | 80424.62 tokens/sec |
+| Final Loss              | 8.3598              |
+| Avg GPU Mem             | 140.5 MB            |
+| Total avg GPU Mem       | 280.9 MB            |
+| Peak GPU Mem            | 313.0 MB            |
+| Total peak GPU Mem      | 626.0 MB            |
+| Avg GPU Utilization     | 72.27%              |
+| Min avg GPU Utilization | 64.22%              |
+
+
+$ python tools/metrics/summary.py compare --baseline ../logs/single_gpu/10m/1763905923/cuda_0.log --dir ../logs/tensor_parallel/10m
 
 === Baseline metrics of single_gpu/10m
 | Metric              | Value               |
 |---------------------|---------------------|
 | Total Tokens        | 406,400             |
-| Total Time          | 6.92 sec            |
-| Total Throughput    | 58697.50 tokens/sec |
-| Final Loss          | 9.0131              |
-| Avg GPU Mem         | 248.1 MB            |
-| Peak GPU Mem        | 616.4 MB            |
-| Avg GPU Utilization | 51.69%              |
+| Total Time          | 4.35 sec            |
+| Total Throughput    | 93459.55 tokens/sec |
+| Final Loss          | 0.0313              |
+| Avg GPU Mem         | 225.3 MB            |
+| Peak GPU Mem        | 503.8 MB            |
+| Avg GPU Utilization | 56.78%              |
 
-=== Comparison Results of single_gpu/10m against torch_ddp/10m/1763605017 (2 devices) ===
-| Metric                 | Value               |
-|------------------------|---------------------|
-| Strategy               | torch_ddp           |
-| Number of Devices      | 2                   |
-| Total Time             | 7.42 seconds        |
-| Total Throughput       | 54795.42 tokens/sec |
-| Avg GPU Mem            | 260.64 MB           |
-| Avg GPU Util %         | 40.42%              |
-| Communication Overhead | 6.65%               |
-| Throughput Efficiency  | 93.35%              |
-| Memory Scaling Factor  | 2.10                |
+=== Comparison Results of single_gpu/10m against tensor_parallel/10m/1763908350 (2 devices) ===
+| Metric                        | Value               |
+|-------------------------------|---------------------|
+| Strategy                      | tensor_parallel     |
+| Number of Devices             | 2                   |
+| Total Time                    | 5.05 seconds        |
+| Total Throughput              | 80424.62 tokens/sec |
+| Avg GPU Mem                   | 140.46 MB           |
+| Avg GPU Util %                | 72.27%              |
+| Distributed Training Overhead | 13.95%              |
+| Throughput Efficiency         | 86.05%              |
+| Memory Scaling Factor         | 0.62                |
 
-=== Comparison Results of single_gpu/10m against torch_ddp/10m/1763605149 (4 devices) ===
-| Metric                 | Value               |
-|------------------------|---------------------|
-| Strategy               | torch_ddp           |
-| Number of Devices      | 4                   |
-| Total Time             | 7.59 seconds        |
-| Total Throughput       | 53543.19 tokens/sec |
-| Avg GPU Mem            | 243.75 MB           |
-| Avg GPU Util %         | 41.78%              |
-| Communication Overhead | 8.78%               |
-| Throughput Efficiency  | 91.22%              |
-| Memory Scaling Factor  | 3.93                |
+=== Comparison Results of single_gpu/10m against tensor_parallel/10m/1763908903 (4 devices) ===
+| Metric                        | Value               |
+|-------------------------------|---------------------|
+| Strategy                      | tensor_parallel     |
+| Number of Devices             | 4                   |
+| Total Time                    | 15.86 seconds       |
+| Total Throughput              | 25623.16 tokens/sec |
+| Avg GPU Mem                   | 100.43 MB           |
+| Avg GPU Util %                | 93.38%              |
+| Distributed Training Overhead | 72.58%              |
+| Throughput Efficiency         | 27.42%              |
+| Memory Scaling Factor         | 0.45                |
 ```
-```
 
+```
