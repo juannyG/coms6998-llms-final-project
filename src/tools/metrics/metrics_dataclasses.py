@@ -3,10 +3,17 @@ These dataclasses are meant to act as datamodel schemas for converting our
 different result types into things we can use across aggregation scripts.
 
 
-TODO: Dataclass for scaling efficiences
-    * throughput_scaling_efficiency = (distributed_throughput / single_gpu_throughput) / num_gpus
-    * memory_efficiency = single_gpu_peak_memory / (total_system_peak_memory / num_gpus)
-    * communication_overhead = 1 - (distributed_throughput / (single_gpu_throughput * num_gpus))
+TODO: Look at traces for REAL communication delay
+* DDP
+  * all devices do identical all-reduce work
+* tensor parallel - same rules as DDP
+  * all devices do identical all-reduce (and/or sum + scatter) work
+* gpipe/pipeline parallelism
+  * Different devices have different communication patterns (send-only, recv-only, send+recv)
+  * Need to look at rank 0, intermediary rank, and last rank indepenently
+  * System bottleneck = the device with highest communication overhead
+* ZeRO
+  * TBD
 """
 
 import abc
@@ -69,7 +76,7 @@ class TrainingResults(TabularMetric):
 
 class ExperimentSummary(TabularMetric):
     """
-    Aggregate TrainingResults and ProfilerSummaries for a particular strategy
+    Aggregate TrainingResults for a particular strategy
 
     Total tokens
         * In the case of DDP, all devices see DIFFERENT tokens, so we take the sum
@@ -84,18 +91,6 @@ class ExperimentSummary(TabularMetric):
     Total peak GPU memory - gives a sense of the worst case memory requirements
     Average GPU utilization is the average of the averages
     Min average GPU utilization shows load balancing issues
-
-    # TODO: HOW DO WE APPLY THESE OUTSIDE OF THE PROFILER?
-    For communication time from ProfilerSummary - pick max value across devices. However, it's worth noting:
-    * DDP
-      * all devices do identical all-reduce work
-      * communication happens in parallel, not sequentially
-    * tensor parallel - same rules as DDP
-      * all devices do identical all-reduce (and/or sum + scatter) work
-      * communication happens in parallel, not sequentially
-    * gpipe/pipeline parallelism
-      * Different devices have different communication patterns (send-only, recv-only, send+recv)
-      * System bottleneck = the device with highest communication overhead
     """
 
     def __init__(
@@ -164,11 +159,11 @@ class ComparisonSummmary:
     * Distributed Training Overhead: everything the training strategy adds relative to single GPU
         - Computation: (Multi-GPU total_time - Single GPU total_time) / Multi-GPU total_time
         - We want small %s; negative is fine too - it means your gaining time relative to the single GPU run.
-    
+
     * Throughput Efficiency: what's the % of speed relative to the single GPU?
         - Computation: Multi-GPU total throughput / single GPU total throughput
         - We want big %s (as close to 100% as possible)
-    
+
     * Memory Scaling Factor: how much better/worse is the memory usage?
         - We want small numbers, preferably < 1, which means you're using less average memory than the baseline
     """
