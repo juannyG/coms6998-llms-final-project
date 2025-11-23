@@ -148,7 +148,7 @@ def run_megatron_data_parallel_experiment(_, conf, device, logger):
         ddp_config = DDPConfig()
         ddp_model = DDP(
             config=tc,
-            ddp_config=ddp_config, 
+            ddp_config=ddp_config,
             module=gpt_model
         )
         # TODO: Remove these...
@@ -190,7 +190,7 @@ def run_megatron_data_parallel_experiment(_, conf, device, logger):
         t0 = time.perf_counter()
         max_steps = conf["max_steps"]
         n_microbatches = 1
-        micro_batch_size = conf["batch_size"] / world_size
+        micro_batch_size = conf["batch_size"] // world_size
         for step in range(max_steps):
             optimizer.zero_grad()
 

@@ -4,7 +4,7 @@ SINGLE_GPU_EXPERIMENT=tensor_parallel
 DDP_EXPERIMENT=megatron_ddp
 PP_EXPERIMENT=megatron_pipeline_parallel # STILL NEEDS PROFILER ADDITION
 TP_EXPERIMENT=tensor_parallel
-LOG_PATH=../logs/
+LOG_PATH=../logs
 #ZERO_EXPERIMENT=zero
 
 .NOTPARALLEL:
@@ -23,8 +23,9 @@ single: \
 
 single_%:
 	RUN_ID=$$(date +%s); \
+				 mkdir $(LOG_PATH)/single_gpu; \
 				 torchrun --nproc-per-node=1 $(TRAIN_SCRIPT) $(SINGLE_GPU_EXPERIMENT) $*; \
-				 mv $(LOG_PATH)/tensor_parallel/* $(LOG_PATH)/single_gpu/
+				 mv $(LOG_PATH)/tensor_parallel/$* $(LOG_PATH)/single_gpu/
 
 ddp: ddp2 ddp4
 
@@ -51,7 +52,7 @@ ddp4_%:
 				torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(DDP_EXPERIMENT) $*
 
 
-tp: tp2 t4
+tp: tp2 tp4
 
 tp2: \
     tp2_10m \
