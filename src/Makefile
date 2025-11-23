@@ -1,0 +1,121 @@
+PYTHON=python
+TRAIN_SCRIPT=run_experiment.py
+SINGLE_GPU_EXPERIMENT=tensor_parallel
+DDP_EXPERIMENT=megatron_ddp
+PP_EXPERIMENT=megatron_pipeline_parallel # STILL NEEDS PROFILER ADDITION
+TP_EXPERIMENT=tensor_parallel
+#ZERO_EXPERIMENT=zero
+
+# Default: run everything
+all: single ddp tp pp zero
+
+clean:
+	rm -rf logs/*
+
+single: \
+    single_10m \
+    single_100m \
+    single_300m \
+    single_500m \
+    single_1b
+
+single_%:
+	torchrun --nproc-per-node=1 $(TRAIN_SCRIPT) $(SINGLE_GPU_EXPERIMENT) $*
+	mv logs/tensor_parallel/* logs/single_gpu/
+
+ddp: ddp2 ddp4
+
+ddp2: \
+    ddp2_10m \
+    ddp2_100m \
+    ddp2_300m \
+    ddp2_500m \
+    ddp2_1b
+
+ddp2_%:
+	torchrun --nproc-per-node=2 $(TRAIN_SCRIPT) $(DDP_EXPERIMENT) $*
+
+ddp4: \
+    ddp4_10m \
+    ddp4_100m \
+    ddp4_300m \
+    ddp4_500m \
+    ddp4_1b
+
+ddp4_%:
+	torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(DDP_EXPERIMENT) $*
+
+
+tp: tp2 t4
+
+tp2: \
+    tp2_10m \
+    tp2_100m \
+    tp2_300m \
+    tp2_500m \
+    tp2_1b
+
+tp2_%:
+	torchrun --nproc-per-node=2 $(TRAIN_SCRIPT) $(TP_EXPERIMENT) $*
+
+tp4: \
+    tp4_10m \
+    tp4_100m \
+    tp4_300m \
+    tp4_500m \
+    tp4_1b
+
+tp4_%:
+	torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(TP_EXPERIMENT) $*
+
+pp: pp2 pp4
+
+pp2: \
+    pp2_10m \
+    pp2_100m \
+    pp2_300m \
+    pp2_500m \
+    pp2_1b
+
+pp2_%:
+	torchrun --nproc-per-node=2 $(TRAIN_SCRIPT) $(PP_EXPERIMENT) $*
+
+pp4: \
+    pp4_10m \
+    pp4_100m \
+    pp4_300m \
+    pp4_500m \
+    pp4_1b
+
+pp4_%:
+	torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(PP_EXPERIMENT) $*
+
+
+# Need the other branch
+#
+#zero: zero2 zero3
+#
+#zero2: \
+#    zero2_4gpu_10m \
+#    zero2_4gpu_100m \
+#    zero2_4gpu_300m \
+#    zero2_4gpu_500m \
+#    zero2_4gpu_1b
+#
+#zero2_4gpu_%:
+#	torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) \
+#		--model-size=$* \
+#		--strategy=zero2
+#
+#zero3: \
+#    zero3_4gpu_10m \
+#    zero3_4gpu_100m \
+#    zero3_4gpu_300m \
+#    zero3_4gpu_500m \
+#    zero3_4gpu_1b
+#
+#zero3_4gpu_%:
+#	torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) \
+#		--model-size=$* \
+#		--strategy=zero3
+#
