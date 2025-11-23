@@ -158,27 +158,25 @@ class ExperimentSummary(TabularMetric):
 
 
 class ComparisonSummmary:
+    """
+    Given a summary of multiple devices for a specific experiment type and a specific
+    single GPU baseline, calculate
+    * Distributed Training Overhead: everything the training strategy adds relative to single GPU
+        - Computation: (Multi-GPU total_time - Single GPU total_time) / Multi-GPU total_time
+        - We want small %s; negative is fine too - it means your gaining time relative to the single GPU run.
+    
+    * Throughput Efficiency: what's the % of speed relative to the single GPU?
+        - Computation: Multi-GPU total throughput / single GPU total throughput
+        - We want big %s (as close to 100% as possible)
+    
+    * Memory Scaling Factor: how much better/worse is the memory usage?
+        - We want small numbers, preferably < 1, which means you're using less average memory than the baseline
+    """
     def __init__(self, baseline_results, experiment_summary):
         self.baseline_results = baseline_results
         self.experiment_summary = experiment_summary
 
     def to_table(self):
-        """
-        Given a summary of multiple devices for a specific experiment type and a specific
-        single GPU baseline, calculate
-
-        * Distributed Training Overhead: everything the training strategy adds relative to single GPU
-            (Multi-GPU total_time - Single GPU total_time) / Multi-GPU total_time
-            - we want small %s
-
-        * Throughput Efficiency: what's the speedup factor (percentage)
-            Multi-GPU total throughput / single GPU total throughput
-            - we want big %s (as close to 100% as possible)
-
-        * Memory Efficiency: how much better/worse is the memory usage?
-            Loading...
-        """
-
         distributed_training_overhead = (
             (self.experiment_summary.total_time_s - self.baseline_results.total_time_s)
             / self.experiment_summary.total_time_s
