@@ -128,3 +128,32 @@ pp4_%:
 # RUN_ID=$$(date +%s); \
 # 		ZERO_CONFIG=zero_configs/zero_3g_stage1.yaml; \
 # 		torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
+
+metrics_ddp: \
+	metrics_ddp_10m \
+	metrics_ddp_100m \
+	metrics_ddp_300m \
+	metrics_ddp_500m \
+	metrics_ddp_1b
+
+metrics_tp: \
+	metrics_tp_10m \
+	metrics_tp_100m \
+	metrics_tp_300m \
+	metrics_tp_500m \
+	metrics_tp_1b
+
+metrics_tp_%:
+	python tools/metrics/summary.py compare --baseline $(LOG_PATH)/single_gpu/$*/*/cuda_0.log --dir $(LOG_PATH)/tensor_parallel/$*
+
+metrics_ddp_%:
+	python tools/metrics/summary.py compare --baseline $(LOG_PATH)/single_gpu/$*/*/cuda_0.log --dir $(LOG_PATH)/megatron_ddp/$*
+
+metrics_pp_%:
+	python tools/metrics/summary.py compare --baseline $(LOG_PATH)/single_gpu/$*/*/cuda_0.log --dir $(LOG_PATH)/megatron_pipeline_parallel/$*
+
+#metrics_zero_%:
+#	python tools/metrics/summary.py compare --baseline $(LOG_PATH)/single_gpu/$*/*/cuda_0.log --dir $(LOG_PATH)/TODO/$*
+
+
+
