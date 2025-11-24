@@ -118,6 +118,7 @@ class ExperimentSummary(TabularMetric):
                 "torch_ddp",
                 "torch_gpipe",  # See comment why we're summing here
                 "megatron_pipeline_parallel",  # See comment why we're summing here
+                "megatron_ddp",  # See comment why we're summing here
             ]:  # TODO: Move these constants, fragile
                 self.total_tokens += tr.total_tokens
             else:
@@ -133,6 +134,8 @@ class ExperimentSummary(TabularMetric):
             )
         self.total_throughput = self.total_tokens / self.total_time_s
         self.avg_gpu_mem_mb = self.total_avg_gpu_mem_mb / self.n_devices
+        if self.strategy in ["torch_ddp", "megatron_ddp"]:
+            self.avg_gpu_mem_mb = self.total_avg_gpu_mem_mb # With DDP - it's the sum of memory
         self.avg_gpu_util_percent /= self.n_devices
 
     def to_table(self):
