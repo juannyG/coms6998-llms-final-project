@@ -12,9 +12,10 @@ Usage:
 """
 
 import argparse
-from dataclasses import dataclass
+import csv
 import json
 import glob
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +27,8 @@ from torch.types import Device
 DEVICE_LEVEL = "device"
 EXPERIMENT_LEVEL = "experiment"
 COMPARISON_LEVEL = "compare"
-LEVELS = [DEVICE_LEVEL, EXPERIMENT_LEVEL, COMPARISON_LEVEL]
+ALL_LEVEL = "all"
+LEVELS = [DEVICE_LEVEL, EXPERIMENT_LEVEL, COMPARISON_LEVEL, ALL_LEVEL]
 
 
 @dataclass
@@ -105,9 +107,7 @@ def main():
     parser.add_argument(
         "--dir", type=str, required=False, help="Directory containing rank JSONL files."
     )
-    parser.add_argument(
-        "--baseline", type=str, required=False, help=""
-    )
+    parser.add_argument("--baseline", type=str, required=False, help="")
     args = parser.parse_args()
 
     if not args.files and not args.dir:
@@ -141,7 +141,9 @@ def main():
     elif args.level == COMPARISON_LEVEL:
         # Nice to have: pull the single gpu run for each strategy's model size dynamically...
         if not args.baseline:
-            print("ERROR: You must provide a baseline file (--baseline) to compare against")
+            print(
+                "ERROR: You must provide a baseline file (--baseline) to compare against"
+            )
             exit(1)
 
         # This should throw execptions if the file does not exist
@@ -149,11 +151,10 @@ def main():
         model_size = run_path.parts[-2]
         strategy = run_path.parts[-3]
         # TODO: With megatron - we can run the "tensor_parallel" experiment with nprocs=1 and get a "single GPU" baseline
-        #if strategy != "single_gpu":
+        # if strategy != "single_gpu":
         #    print(f"ERROR: Baseilne files must be of strategy single_gpu: given {strategy}")
         #    exit(1)
 
-        training_results = TrainingResults()
         training_metrics = get_metrics(
             args.baseline, DeviceSummary.TRAINING_RESULTS_LOG_MESSAGE
         )
@@ -168,8 +169,59 @@ def main():
         summary_by_run_key = generate_experiment_summary(dev_log_iterator)
         for run_key, experiment_summary in summary_by_run_key.items():
             comparison = ComparisonSummmary(baseline_results, experiment_summary)
-            print(f"\n=== Comparison Results of {strategy}/{model_size} against {run_key} ({experiment_summary.n_devices} devices) ===")
+            print(
+                f"\n=== Comparison Results of {strategy}/{model_size} against {run_key} ({experiment_summary.n_devices} devices) ==="
+            )
             print(comparison.to_table())
+    elif args.level == "all":
+        summary_by_run_key = generate_experiment_summary(dev_log_iterator)
+        baseline_summaries = {}
+        for run_key, experiment_summary in summary_by_run_key.items():
+            if "single_gpu" not in run_key:
+                continue
+            baseline_summaries[experiment_summary.model_size] = experiment_summary
+
+        with open("/tmp/all_metrics.csv", "w", newline="") as f:
+            columns = [
+                "model_size",
+                "strategy",
+                "num_devices",
+                "total_tokens",
+                "total_time_sec",
+                "throughput_tokens_sec",
+                "avg_gpu_mem_mb",
+                "avg_gpu_util_percent",
+                "relative_runtime_overhead_percent",
+                "ideal_scaling_throughput",
+                "throughput_scaling_factor",
+                "throughput_efficiency_percent",
+                "memory_scaling_factor",
+            ]
+            writer = csv.DictWriter(f, fieldnames=columns)
+            writer.writeheader()
+
+            for run_key, experiment_summary in summary_by_run_key.items():
+                baseline_summary = baseline_summaries[experiment_summary.model_size]
+                baseline_training_results = baseline_summary.training_results[0]
+                comparison = ComparisonSummmary(
+                    baseline_training_results, experiment_summary
+                )
+                row = {
+                    "model_size": experiment_summary.model_size,
+                    "strategy": experiment_summary.strategy,
+                    "num_devices": experiment_summary.n_devices,
+                    "total_tokens": baseline_training_results.total_tokens,
+                    "total_time_sec": experiment_summary.total_time_s,
+                    "throughput_tokens_sec": experiment_summary.total_throughput,
+                    "avg_gpu_mem_mb": experiment_summary.avg_gpu_mem_mb,
+                    "avg_gpu_util_percent": experiment_summary.avg_gpu_util_percent,
+                    "relative_runtime_overhead_percent": comparison.relative_runtime_overhead_percent,
+                    "ideal_scaling_throughput": comparison.ideal_scaling_throughput,
+                    "throughput_scaling_factor": comparison.throughput_scaling_factor,
+                    "throughput_efficiency_percent": comparison.throughput_efficiency_percent,
+                    "memory_scaling_factor": comparison.memory_scaling_factor,
+                }
+                writer.writerow(row)
 
 
 if __name__ == "__main__":

@@ -16,10 +16,11 @@ def generate_experiment_summary(device_log_iterator):
     summary_by_run_key = {}
     for run_key, device_entries in grouped.items():
         strategy = device_entries[0].strategy
+        model_size = device_entries[0].model_size
         n_devices = len(device_entries)
         all_training_results = [d.training_results for d in device_entries]
 
-        summary = ExperimentSummary(strategy, n_devices, all_training_results)
+        summary = ExperimentSummary(strategy, model_size, n_devices, all_training_results)
         summary.build_summary()
         summary_by_run_key[run_key] = summary
     return summary_by_run_key

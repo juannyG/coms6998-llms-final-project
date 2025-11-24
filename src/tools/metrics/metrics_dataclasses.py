@@ -20,6 +20,7 @@ import abc
 from dataclasses import dataclass
 
 from tabulate import tabulate
+from torch.utils.data import non_deterministic
 
 
 class TabularMetric(abc.ABC):
@@ -94,11 +95,17 @@ class ExperimentSummary(TabularMetric):
     """
 
     def __init__(
-        self, strategy, n_devices, training_results=None, profiler_results=None
+        self,
+        strategy,
+        model_size,
+        n_devices,
+        training_results=None,
+        profiler_results=None,
     ):
         self.strategy = strategy
         self.training_results = training_results or []
         self.n_devices = n_devices
+        self.model_size = model_size
 
         # Aggregated training results
         self.total_tokens = 0
@@ -135,7 +142,9 @@ class ExperimentSummary(TabularMetric):
         self.total_throughput = self.total_tokens / self.total_time_s
         self.avg_gpu_mem_mb = self.total_avg_gpu_mem_mb / self.n_devices
         if self.strategy in ["torch_ddp", "megatron_ddp"]:
-            self.avg_gpu_mem_mb = self.total_avg_gpu_mem_mb # With DDP - it's the sum of memory
+            self.avg_gpu_mem_mb = (
+                self.total_avg_gpu_mem_mb
+            )  # With DDP - it's the sum of memory
         self.avg_gpu_util_percent /= self.n_devices
 
     def to_table(self):
@@ -158,41 +167,75 @@ class ExperimentSummary(TabularMetric):
 class ComparisonSummmary:
     """
     Given a summary of multiple devices for a specific experiment type and a specific
-    single GPU baseline, calculate
-    * Distributed Training Overhead: everything the training strategy adds relative to single GPU
-        - Computation: (Multi-GPU total_time - Single GPU total_time) / Multi-GPU total_time
-        - We want small %s; negative is fine too - it means your gaining time relative to the single GPU run.
+    single-GPU baseline, compute the following metrics:
 
-    * Throughput Efficiency: what's the % of speed relative to the single GPU?
-        - Computation: Multi-GPU total throughput / single GPU total throughput
-        - We want big %s (as close to 100% as possible)
+    * Relative Runtime Overhead %
+        - Definition: How much slower or faster the multi-GPU run is compared to single GPU.
+        - Computation: (multi_gpu_total_time / single_gpu_total_time - 1) * 100
+        - Interpretation:
+            • > 0%  --> multi-GPU is slower (bad)
+            • < 0%  --> multi-GPU is faster (good)
+        - Notes: This captures effective *end-to-end* overhead, including overlapped
+          communication/computation (used in MT-NLG 530B and DeepSpeed ZeRO).
 
-    * Memory Scaling Factor: how much better/worse is the memory usage?
-        - We want small numbers, preferably < 1, which means you're using less average memory than the baseline
+    * Ideal Scaling Throughput (Shallue et al., 2018)
+        - Computation: single_gpu_throughput * num_devices
+        - Interpretation: The throughput we would get under perfect linear scaling.
+
+    * Throughput scaling factor
+        - Computation: multi_gpu_throughput / single_gpu_throughput
+        - Interpretation:
+            • 1.0  --> same speed as a single GPU
+            • < 1  --> slower than single GPU
+            • > 1  --> faster than single GPU
+            • ~= num_devices --> ideal scaling
+        - Purpose: Measures absolute performance gain (not normalized by device count).
+
+    * Throughput Scaling Efficiency (Shallue et al., 2018)
+        - Computation: (throughput scaling factor / num_devices) * 100
+        - Interpretation:
+            • 100% --> perfect linear scaling
+            • 0–100% --> typical real-world scaling
+            • Always <= 100% by definition (unlike relative throughput uplift)
+
+    * Memory Scaling Factor
+        - Computation: multi_gpu_avg_memory / single_gpu_avg_memory
+        - Interpretation:
+            • < 1 --> uses less memory per GPU than single GPU baseline
+            • ~1 --> similar memory behavior
+            • > 1 --> uses more memory per GPU (common for DDP due to full model replication)
     """
+
     def __init__(self, baseline_results, experiment_summary):
         self.baseline_results = baseline_results
         self.experiment_summary = experiment_summary
 
-    def to_table(self):
-        distributed_training_overhead = (
-            (self.experiment_summary.total_time_s - self.baseline_results.total_time_s)
-            / self.experiment_summary.total_time_s
-            * 100
+        self.relative_runtime_overhead_percent = (
+            (self.experiment_summary.total_time_s / self.baseline_results.total_time_s)
+            - 1
+        ) * 100
+
+        self.ideal_scaling_throughput = (
+            self.baseline_results.total_throughput * self.experiment_summary.n_devices
         )
 
-        # Validation: this should just be (100% - comms overhead)
-        throughput_efficiency_percent = (
+        self.throughput_scaling_factor = (
             self.experiment_summary.total_throughput
             / self.baseline_results.total_throughput
+        )
+
+        self.throughput_efficiency_percent = (
+            self.throughput_scaling_factor / self.experiment_summary.n_devices
         ) * 100
 
         total_mem_used = self.experiment_summary.avg_gpu_mem_mb
         if self.experiment_summary.strategy == "torch_ddp":
             total_mem_used *= self.experiment_summary.n_devices
-        memory_scaling_factor = (
-            total_mem_used / (self.baseline_results.avg_gpu_mem_mb)
+        self.memory_scaling_factor = total_mem_used / (
+            self.baseline_results.avg_gpu_mem_mb
         )
+
+    def to_table(self):
         table = [
             ["Strategy", self.experiment_summary.strategy],
             ["Number of Devices", self.experiment_summary.n_devices],
@@ -203,8 +246,13 @@ class ComparisonSummmary:
             ],
             ["Avg GPU Mem", f"{self.experiment_summary.avg_gpu_mem_mb:.2f} MB"],
             ["Avg GPU Util %", f"{self.experiment_summary.avg_gpu_util_percent:.2f}%"],
-            ["Distributed Training Overhead", f"{distributed_training_overhead:.2f}%"],
-            ["Throughput Efficiency", f"{throughput_efficiency_percent:.2f}%"],
-            ["Memory Scaling Factor", f"{memory_scaling_factor:.2f}"],
+            [
+                "Relative Runtime Overhead",
+                f"{self.relative_runtime_overhead_percent:.2f}%",
+            ],
+            ["Ideal Scaling Throughput", f"{self.ideal_scaling_throughput} tokens/sec"],
+            ["Throughput Scaling Factor", f"{self.throughput_scaling_factor}"],
+            ["Throughput Efficiency", f"{self.throughput_efficiency_percent:.2f}%"],
+            ["Memory Scaling Factor", f"{self.memory_scaling_factor:.2f}"],
         ]
         return tabulate(table, headers=["Metric", "Value"], tablefmt="github")
