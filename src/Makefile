@@ -22,10 +22,9 @@ single: \
     single_1b
 
 single_%:
-	RUN_ID=$$(date +%s); \
-				 mkdir $(LOG_PATH)/single_gpu; \
-				 torchrun --nproc-per-node=1 $(TRAIN_SCRIPT) $(SINGLE_GPU_EXPERIMENT) $*; \
-				 mv $(LOG_PATH)/tensor_parallel/$* $(LOG_PATH)/single_gpu/
+	mkdir $(LOG_PATH)/single_gpu; \
+		RUN_ID=$$(date +%s) torchrun --nproc-per-node=1 $(TRAIN_SCRIPT) $(SINGLE_GPU_EXPERIMENT) $*; \
+		mv $(LOG_PATH)/tensor_parallel/$* $(LOG_PATH)/single_gpu/
 
 ddp: ddp2 ddp4
 
@@ -37,8 +36,7 @@ ddp2: \
     ddp2_1b
 
 ddp2_%:
-	RUN_ID=$$(date +%s); \
-				 torchrun --nproc-per-node=2 $(TRAIN_SCRIPT) $(DDP_EXPERIMENT) $*
+	RUN_ID=$$(date +%s) torchrun --nproc-per-node=2 $(TRAIN_SCRIPT) $(DDP_EXPERIMENT) $*
 
 ddp4: \
     ddp4_10m \
@@ -48,8 +46,7 @@ ddp4: \
     ddp4_1b
 
 ddp4_%:
-	RUN_ID=$$(date +%s); \
-				torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(DDP_EXPERIMENT) $*
+	RUN_ID=$$(date +%s) torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(DDP_EXPERIMENT) $*
 
 
 tp: tp2 tp4
@@ -62,8 +59,7 @@ tp2: \
     tp2_1b
 
 tp2_%:
-	RUN_ID=$$(date +%s); \
-				 torchrun --nproc-per-node=2 $(TRAIN_SCRIPT) $(TP_EXPERIMENT) $*
+	RUN_ID=$$(date +%s) torchrun --nproc-per-node=2 $(TRAIN_SCRIPT) $(TP_EXPERIMENT) $*
 
 tp4: \
     tp4_10m \
@@ -73,8 +69,7 @@ tp4: \
     tp4_1b
 
 tp4_%:
-	RUN_ID=$$(date +%s); \
-				 torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(TP_EXPERIMENT) $*
+	RUN_ID=$$(date +%s) torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(TP_EXPERIMENT) $*
 
 pp: pp2 pp4
 
@@ -86,8 +81,7 @@ pp2: \
     pp2_1b
 
 pp2_%:
-	RUN_ID=$$(date +%s); \
-				 torchrun --nproc-per-node=2 $(TRAIN_SCRIPT) $(PP_EXPERIMENT) $*
+	RUN_ID=$$(date +%s) torchrun --nproc-per-node=2 $(TRAIN_SCRIPT) $(PP_EXPERIMENT) $*
 
 pp4: \
     pp4_10m \
@@ -97,8 +91,7 @@ pp4: \
     pp4_1b
 
 pp4_%:
-	RUN_ID=$$(date +%s); \
-				 torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(PP_EXPERIMENT) $*
+	RUN_ID=$$(date +%s) torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(PP_EXPERIMENT) $*
 
 
 # Need the other branch
@@ -113,9 +106,7 @@ pp4_%:
 #    zero2_4gpu_1b
 #
 #zero2_4gpu_%:
-# RUN_ID=$$(date +%s); \
-# 		ZERO_CONFIG=zero_configs/zero_2g_stage1.yaml; \
-# 		torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
+# RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_2g_stage1.yaml torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
 #
 #zero3: \
 #    zero3_4gpu_10m \
@@ -125,9 +116,7 @@ pp4_%:
 #    zero3_4gpu_1b
 #
 #zero3_4gpu_%:
-# RUN_ID=$$(date +%s); \
-# 		ZERO_CONFIG=zero_configs/zero_3g_stage1.yaml; \
-# 		torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
+# RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_3g_stage1.yaml torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
 
 metrics_ddp: \
 	metrics_ddp_10m \
