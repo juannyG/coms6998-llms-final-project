@@ -190,12 +190,14 @@ def main():
                 "total_time_sec",
                 "throughput_tokens_sec",
                 "avg_gpu_mem_mb",
+                "total_gpu_mem_mb",
                 "avg_gpu_util_percent",
                 "relative_runtime_overhead_percent",
                 "ideal_scaling_throughput",
                 "throughput_scaling_factor",
                 "throughput_efficiency_percent",
                 "memory_scaling_factor",
+                "total_memory_scaling_factor",
             ]
             writer = csv.DictWriter(f, fieldnames=columns)
             writer.writeheader()
@@ -214,12 +216,14 @@ def main():
                     "total_time_sec": experiment_summary.total_time_s,
                     "throughput_tokens_sec": experiment_summary.total_throughput,
                     "avg_gpu_mem_mb": experiment_summary.avg_gpu_mem_mb,
+                    "total_gpu_mem_mb": comparison.total_gpu_mem_mb,
                     "avg_gpu_util_percent": experiment_summary.avg_gpu_util_percent,
                     "relative_runtime_overhead_percent": comparison.relative_runtime_overhead_percent,
                     "ideal_scaling_throughput": comparison.ideal_scaling_throughput,
                     "throughput_scaling_factor": comparison.throughput_scaling_factor,
                     "throughput_efficiency_percent": comparison.throughput_efficiency_percent,
                     "memory_scaling_factor": comparison.memory_scaling_factor,
+                    "total_memory_scaling_factor": comparison.total_memory_scaling_factor,
                 }
                 writer.writerow(row)
 

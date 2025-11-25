@@ -141,10 +141,6 @@ class ExperimentSummary(TabularMetric):
             )
         self.total_throughput = self.total_tokens / self.total_time_s
         self.avg_gpu_mem_mb = self.total_avg_gpu_mem_mb / self.n_devices
-        if self.strategy in ["torch_ddp", "megatron_ddp"]:
-            self.avg_gpu_mem_mb = (
-                self.total_avg_gpu_mem_mb
-            )  # With DDP - it's the sum of memory
         self.avg_gpu_util_percent /= self.n_devices
 
     def to_table(self):
@@ -228,10 +224,15 @@ class ComparisonSummmary:
             self.throughput_scaling_factor / self.experiment_summary.n_devices
         ) * 100
 
-        total_mem_used = self.experiment_summary.avg_gpu_mem_mb
-        if self.experiment_summary.strategy == "torch_ddp":
-            total_mem_used *= self.experiment_summary.n_devices
-        self.memory_scaling_factor = total_mem_used / (
+        self.memory_scaling_factor = (
+            self.experiment_summary.avg_gpu_mem_mb
+            / self.baseline_results.avg_gpu_mem_mb
+        )
+
+        self.total_gpu_mem_mb = (
+            self.experiment_summary.avg_gpu_mem_mb * self.experiment_summary.n_devices
+        )
+        self.total_memory_scaling_factor = self.total_gpu_mem_mb / (
             self.baseline_results.avg_gpu_mem_mb
         )
 
@@ -245,6 +246,7 @@ class ComparisonSummmary:
                 f"{self.experiment_summary.total_throughput:.2f} tokens/sec",
             ],
             ["Avg GPU Mem", f"{self.experiment_summary.avg_gpu_mem_mb:.2f} MB"],
+            ["Total GPU Mem", f"{self.total_gpu_mem_mb:.2f} MB"],
             ["Avg GPU Util %", f"{self.experiment_summary.avg_gpu_util_percent:.2f}%"],
             [
                 "Relative Runtime Overhead",
@@ -254,5 +256,6 @@ class ComparisonSummmary:
             ["Throughput Scaling Factor", f"{self.throughput_scaling_factor}"],
             ["Throughput Efficiency", f"{self.throughput_efficiency_percent:.2f}%"],
             ["Memory Scaling Factor", f"{self.memory_scaling_factor:.2f}"],
+            ["Total Memory Scaling Factor", f"{self.total_memory_scaling_factor:.2f}"],
         ]
         return tabulate(table, headers=["Metric", "Value"], tablefmt="github")

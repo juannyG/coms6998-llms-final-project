@@ -9,6 +9,6 @@ megatron-core
 #datasets                # Do we want to use real data sets?
 
 # Could be useful for plotting results?
-#matplotlib
-#pandas
+matplotlib
+pandas
 -e . # For development and script execution, do a local + editable install
