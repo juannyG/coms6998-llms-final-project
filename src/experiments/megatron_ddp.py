@@ -6,6 +6,8 @@ from functools import partial
 import torch
 from torch.optim import Adam
 from megatron.core import parallel_state
+from megatron.core.distributed.distributed_data_parallel import DistributedDataParallel as DDP
+from megatron.core.distributed.distributed_data_parallel_config import DistributedDataParallelConfig as DDPConfig
 from megatron.core.distributed.finalize_model_grads import finalize_model_grads
 from megatron.core.models.gpt.gpt_layer_specs import get_gpt_layer_local_spec
 from megatron.core.models.gpt.gpt_model import GPTModel
@@ -14,6 +16,7 @@ from megatron.core.tensor_parallel.random import model_parallel_cuda_manual_seed
 from megatron.core.transformer import TransformerConfig
 from torch.profiler import profile, record_function, ProfilerActivity
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
 from datasets.synthetic import SyntheticDataset
 from tools.metrics.metrics_dataclasses import TrainingResults
@@ -95,7 +98,7 @@ def forward_step_func(data_iterator, gpt_model):
     return output_tensor, partial(loss_func, loss_mask)
 
 
-def run_tensor_parallel_experiment(_, conf, device, logger):
+def run_megatron_data_parallel_experiment(_, conf, device, logger):
     if device.type == "cpu" or not torch.cuda.is_available():
         print("Megatron experiments cannot be run on CPU devices. Exiting...")
         exit(1)
@@ -123,7 +126,7 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
         rank=rank,
         timeout=datetime.timedelta(seconds=30),
     )
-    parallel_state.initialize_model_parallel(tensor_model_parallel_size=world_size)
+    parallel_state.initialize_model_parallel() # Defaults tp=pp=1
 
     try:
         model_parallel_cuda_manual_seed(123)
@@ -142,29 +145,38 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
         )
         gpt_model.to(device=device, dtype=conf["dtype"])
 
+        ddp_config = DDPConfig()
+        ddp_model = DDP(
+            config=tc,
+            ddp_config=ddp_config,
+            module=gpt_model
+        )
         # TODO: Remove these...
         # print(gpt_model)
         # print(f"Total parameters: {sum(p.numel() for p in gpt_model.parameters())}")
 
-        optimizer = Adam(gpt_model.parameters())
+        optimizer = Adam(ddp_model.parameters())
 
         dataset = MegatronSyntheticDataset(
             n_samples=10000,
             seq_len=conf["seq_len"],
             vocab_size=conf["vocab_size"],
         )
+
+        sampler = DistributedSampler(dataset)
         loader = DataLoader(
             dataset,
-            batch_size=conf["batch_size"],
-            shuffle=True,
-            num_workers=0,
+            batch_size=conf["batch_size"] // world_size,
+            shuffle=False,
+            num_workers=2,
             pin_memory=True,
+            sampler=sampler,
         )
         it = iter(loader)
 
         forward_back_func = get_forward_backward_func()
 
-        gpt_model.train()
+        ddp_model.train()
         step = 0
         total_tokens = 0
         cur_mem = 0
@@ -178,7 +190,7 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
         t0 = time.perf_counter()
         max_steps = conf["max_steps"]
         n_microbatches = 1
-        micro_batch_size = conf["batch_size"]
+        micro_batch_size = conf["batch_size"] // world_size
         for step in range(max_steps):
             optimizer.zero_grad()
 
@@ -188,7 +200,7 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
             losses_reduced = forward_back_func(
                 forward_step_func=forward_step_func,
                 data_iterator=it,
-                model=gpt_model,
+                model=ddp_model,
                 num_microbatches=n_microbatches,
                 seq_length=conf["seq_len"],
                 micro_batch_size=micro_batch_size,
@@ -196,7 +208,7 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
                 forward_only=False,
             )
             # Might need this for DP?
-            #finalize_model_grads([gpt_model])
+            finalize_model_grads([ddp_model])
 
             optimizer.step()
 
@@ -280,13 +292,16 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
                     losses_reduced = forward_back_func(
                         forward_step_func=forward_step_func,
                         data_iterator=it,
-                        model=gpt_model,
-                        num_microbatches=1,
+                        model=ddp_model,
+                        num_microbatches=n_microbatches,
                         seq_length=conf["seq_len"],
-                        micro_batch_size=conf["batch_size"],
+                        micro_batch_size=micro_batch_size,
                         decoder_seq_length=conf["seq_len"],
                         forward_only=False,
                     )
+
+                with record_function(MODEL_FINALIZE_GRADIENTS_PROFILER_LABEL):
+                    finalize_model_grads([ddp_model])
 
                 with record_function(MODEL_OPTIMIZER_PROFILER_LABEL):
                     optimizer.step()

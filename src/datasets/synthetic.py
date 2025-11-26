@@ -5,7 +5,7 @@ from torch.utils.data import Dataset
 
 
 class SyntheticDataset(Dataset):
-    def __init__(self, n_samples, seq_len, vocab_size, seed=1111):
+    def __init__(self, n_samples, seq_len, vocab_size, seed=1111, *args, **kwargs):
         self.n_samples = n_samples
         self.seq_len = seq_len
         self.vocab_size = vocab_size

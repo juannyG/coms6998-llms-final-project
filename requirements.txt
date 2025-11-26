@@ -8,6 +8,6 @@ deepspeed
 mpi4py  # Required by deepspeed, which also depends on sudo apt-get install openmpi-bin libopenmpi-dev
 
 # Could be useful for plotting results?
-#matplotlib
-#pandas
+matplotlib
+pandas
 -e . # For development and script execution, do a local + editable install

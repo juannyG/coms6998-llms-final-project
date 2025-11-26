@@ -43,7 +43,7 @@ CONF = {
         "batch_size": 16,
         "lr": 0.0002,
         "dtype": torch.float32,
-        "max_steps": 400,
+        "max_steps": 200,
         "warmup_steps": 20,
     },
     "100m": {
@@ -56,7 +56,7 @@ CONF = {
         "batch_size": 16,
         "lr": 2e-4,
         "dtype": torch.bfloat16,
-        "max_steps": 400,
+        "max_steps": 200,
         "warmup_steps": 20,
     },
     "300m": {
@@ -69,7 +69,7 @@ CONF = {
         "batch_size": 8,  # bring this down because we're doing more... we can boost it once we see how it behaves
         "lr": 2e-4,
         "dtype": torch.bfloat16,
-        "max_steps": 400,
+        "max_steps": 200,
         "warmup_steps": 20,
     },
     "500m": {
@@ -82,7 +82,7 @@ CONF = {
         "batch_size": 8,
         "lr": 2e-4,
         "dtype": torch.bfloat16,
-        "max_steps": 400,
+        "max_steps": 200,
         "warmup_steps": 20,
     },
     "1b": {
@@ -95,7 +95,7 @@ CONF = {
         "batch_size": 4,  # bring it down even further...
         "lr": 2e-4,
         "dtype": torch.bfloat16,
-        "max_steps": 400,
+        "max_steps": 200,
         "warmup_steps": 20,
     },
 }

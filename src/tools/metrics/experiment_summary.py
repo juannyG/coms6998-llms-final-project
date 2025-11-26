@@ -1,6 +1,6 @@
 import collections
 
-from tools.metrics.metrics_dataclasses import ProfilerSummary, TrainingResults
+from tools.metrics.metrics_dataclasses import ExperimentSummary
 
 
 def group_by_experiments(device_log_iterator):
@@ -13,19 +13,14 @@ def group_by_experiments(device_log_iterator):
 def generate_experiment_summary(device_log_iterator):
     grouped = group_by_experiments(device_log_iterator)
 
+    summary_by_run_key = {}
     for run_key, device_entries in grouped.items():
-        metric_type = device_entries[0].metric_type
-        print(f"\n=== Aggregated Results for {run_key} ({metric_type}) ===")
+        strategy = device_entries[0].strategy
+        model_size = device_entries[0].model_size
+        n_devices = len(device_entries)
+        all_training_results = [d.training_results for d in device_entries]
 
-        # TODO: Move the "metric type" constants some place else
-        if metric_type == "training":
-            aggregate_training = TrainingResults.aggregate(
-                [d.summary for d in device_entries]
-            )
-            print(aggregate_training.to_table())
-
-        elif metric_type == "profiler":
-            merged_profiler_summary = ProfilerSummary.aggregate(
-                [d.summary for d in device_entries]
-            )
-            print(merged_profiler_summary.to_table())
+        summary = ExperimentSummary(strategy, model_size, n_devices, all_training_results)
+        summary.build_summary()
+        summary_by_run_key[run_key] = summary
+    return summary_by_run_key

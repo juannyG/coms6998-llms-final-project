@@ -29,30 +29,30 @@ MODEL_FORWARD_PROFILER_LABEL = "model_forward"
 MODEL_LOSS_PROFILER_LABEL = "model_loss"
 MODEL_FORWARD_BACKWARD_PROFILER_LABEL = "model_forward_backward"
 MODEL_OPTIMIZER_PROFILER_LABEL = "model_optimizer_step"
-MODEL_FINALIZE_GRADIENTS_PROFILER_LABEL = "model_finalize_gradients"
 EXPERIMENT_PROFILER_LABELS = [
     MODEL_FORWARD_PROFILER_LABEL,
     MODEL_LOSS_PROFILER_LABEL,
     MODEL_FORWARD_BACKWARD_PROFILER_LABEL,
     MODEL_OPTIMIZER_PROFILER_LABEL,
-    MODEL_FINALIZE_GRADIENTS_PROFILER_LABEL,
 ]
 
 
 class MegatronSyntheticDataset(SyntheticDataset):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.num_attention_heads = kwargs.get('num_attention_heads', 0)
+
     def __getitem__(self, idx):
         tokens = super().__getitem__(idx)
-
+        
         # Create Megatron-expected format
         # See: https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/datasets/gpt_dataset.py#L645-L661
         return {
-            "tokens": tokens,
-            "attention_mask": torch.tril(
-                torch.ones((self.seq_len, self.seq_len), dtype=torch.bool)
-            ).unsqueeze(0),
-            "position_ids": torch.arange(self.seq_len, dtype=torch.long),
-            "labels": tokens.clone(),  # We need something...so just use the tokens...
-            "loss_mask": torch.ones(self.seq_len, dtype=torch.float),
+            'tokens': tokens,
+            'attention_mask': torch.tril(torch.ones(self.num_attention_heads, self.seq_len, self.seq_len, dtype=torch.bool)),
+            'position_ids': torch.arange(self.seq_len, dtype=torch.long),
+            'labels': tokens.clone(), # We need something...so just use the tokens...
+            'loss_mask': torch.ones(self.seq_len, dtype=torch.float)
         }
 
 
@@ -95,7 +95,7 @@ def forward_step_func(data_iterator, gpt_model):
     return output_tensor, partial(loss_func, loss_mask)
 
 
-def run_tensor_parallel_experiment(_, conf, device, logger):
+def run_pipeline_parallel_experiment(_, conf, device, logger):
     if device.type == "cpu" or not torch.cuda.is_available():
         print("Megatron experiments cannot be run on CPU devices. Exiting...")
         exit(1)
@@ -118,33 +118,35 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
     world_size = int(os.environ["WORLD_SIZE"])
     torch.cuda.set_device(rank)
     torch.distributed.init_process_group(
-        backend="nccl",
+        backend='nccl',
         world_size=world_size,
         rank=rank,
-        timeout=datetime.timedelta(seconds=30),
+        timeout=datetime.timedelta(seconds=10)
     )
-    parallel_state.initialize_model_parallel(tensor_model_parallel_size=world_size)
+    parallel_state.initialize_model_parallel(pipeline_model_parallel_size=world_size)
 
     try:
         model_parallel_cuda_manual_seed(123)
+        print(f"Rank {rank}: Set random seed")
 
         tc = TransformerConfig(
             num_layers=conf["n_layers"],
             hidden_size=conf["d_model"],
             num_attention_heads=conf["n_heads"],
+            pipeline_dtype=conf["dtype"],
+            pipeline_model_parallel_size=world_size,
         )
+        print(f"Rank {rank}: Created TransformerConfig")
 
         gpt_model = GPTModel(
             config=tc,
             transformer_layer_spec=get_gpt_layer_local_spec(),
             vocab_size=conf["vocab_size"],
             max_sequence_length=conf["seq_len"],
+            pre_process=(rank == 0),
+            post_process=(rank == world_size - 1)
         )
         gpt_model.to(device=device, dtype=conf["dtype"])
-
-        # TODO: Remove these...
-        # print(gpt_model)
-        # print(f"Total parameters: {sum(p.numel() for p in gpt_model.parameters())}")
 
         optimizer = Adam(gpt_model.parameters())
 
@@ -152,14 +154,16 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
             n_samples=10000,
             seq_len=conf["seq_len"],
             vocab_size=conf["vocab_size"],
+            num_attention_heads=conf["n_heads"]
         )
         loader = DataLoader(
             dataset,
-            batch_size=conf["batch_size"],
+            batch_size=conf["batch_size"] // world_size,
             shuffle=True,
             num_workers=0,
             pin_memory=True,
         )
+
         it = iter(loader)
 
         forward_back_func = get_forward_backward_func()
@@ -177,8 +181,8 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
         reset_peak_mem()
         t0 = time.perf_counter()
         max_steps = conf["max_steps"]
-        n_microbatches = 1
-        micro_batch_size = conf["batch_size"]
+        n_microbatches = world_size
+        micro_batch_size = conf["batch_size"] // n_microbatches
         for step in range(max_steps):
             optimizer.zero_grad()
 
@@ -190,13 +194,11 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
                 data_iterator=it,
                 model=gpt_model,
                 num_microbatches=n_microbatches,
-                seq_length=conf["seq_len"],
                 micro_batch_size=micro_batch_size,
+                seq_length=conf["seq_len"],
                 decoder_seq_length=conf["seq_len"],
                 forward_only=False,
             )
-            # Might need this for DP?
-            #finalize_model_grads([gpt_model])
 
             optimizer.step()
 
@@ -205,10 +207,12 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
 
             # metrics
             step_time = t_after - t_before
-            # We have to do things in a slightly different way, given that the dimensions are buried in the `forward_step_func` closure, but we can still compute tokens based on our parameters...
+
             # These are constants, but, whatever - do it each time in the loop...
-            total_tokens += micro_batch_size * (conf["seq_len"] - 1) * n_microbatches
-            loss = losses_reduced[0]["loss"]
+            # Tweaked computation: Tokens per step = batch_size * (seq_len - 1) * num_microbatches
+            if rank == world_size - 1:
+                total_tokens += micro_batch_size * (conf["seq_len"] - 1) * n_microbatches
+                loss = losses_reduced[0]["loss"]
 
             cur_mem, peak_mem = gpu_memory_allocated()
             gpu_util = gpu_utilization_percent()
@@ -220,7 +224,7 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
                     extra={
                         "extra": {
                             "step": f"{step + 1}/{max_steps}",
-                            "loss": f"{losses_reduced[0]['loss'].item():.4f}",
+                            "loss": f"{loss.item():.4f}",
                             "step_time_s": f"{step_time:.4f}",
                             "current_gpu_mem_MB": f"{cur_mem:.1f}",
                             "peak_gpu_mem_MB": f"{peak_mem:.1f}",
@@ -230,7 +234,12 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
                 )
 
         total_time = time.perf_counter() - t0
-        total_throughput = total_tokens / total_time
+        total_throughput = 0
+        avg_gpu_mem_mb = 0
+        avg_gpu_util_percent = 0
+        if rank == world_size - 1:
+            # TODO: Explain why we're only using last rank for these metrics
+            total_throughput = total_tokens / total_time
 
         avg_gpu_mem_mb = (
             sum(gpu_mem_per_step) / len(gpu_mem_per_step) if gpu_mem_per_step else 0
@@ -252,7 +261,6 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
             "Training results",
             extra={"extra": training_results.to_dict()},
         )
-
         steps = 8
         dir_name = get_log_file_parent_dir(logger)
         worker_name = f"rank_{rank}"
@@ -281,9 +289,9 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
                         forward_step_func=forward_step_func,
                         data_iterator=it,
                         model=gpt_model,
-                        num_microbatches=1,
+                        num_microbatches=n_microbatches,
+                        micro_batch_size=micro_batch_size,
                         seq_length=conf["seq_len"],
-                        micro_batch_size=conf["batch_size"],
                         decoder_seq_length=conf["seq_len"],
                         forward_only=False,
                     )
@@ -294,6 +302,8 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
                 torch.cuda.synchronize() if device.type.startswith("cuda") else None
 
                 prof.step()
-
+    except Exception as exc:
+        print(exc)
+        raise exc
     finally:
         torch.distributed.destroy_process_group()

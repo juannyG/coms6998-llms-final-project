@@ -4,57 +4,43 @@ summaries of different type of measurements from our experiments at different
 levels of aggregation.
 
 Usage:
-    python tools/metrics/summary.py device training --dir ../logs/
+    python tools/metrics/summary.py device --dir ../logs/
 
-    python tools/metrics/summary.py experiment profiler --files ../logs/single_gpu/10m/1234567890/*
+    python tools/metrics/summary.py experiment --files ../logs/single_gpu/10m/1234567890/*
+
+    python tools/metrics/summary.py compare --baseline ../logs/single_gpu/100m/7890123456/cuda_0.log--files ../logs/torch_ddp/100m/1234567890/
 """
 
 import argparse
-from dataclasses import dataclass
+import csv
 import json
 import glob
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from experiments import single_gpu, torch_ddp, torch_gpipe, tensor_parallel
 from tools.metrics.experiment_summary import generate_experiment_summary
-from tools.metrics.metrics_dataclasses import TrainingResults, ProfilerSummary
+from tools.metrics.metrics_dataclasses import ComparisonSummmary, TrainingResults
+from torch.types import Device
 
 DEVICE_LEVEL = "device"
 EXPERIMENT_LEVEL = "experiment"
+COMPARISON_LEVEL = "compare"
+ALL_LEVEL = "all"
+LEVELS = [DEVICE_LEVEL, EXPERIMENT_LEVEL, COMPARISON_LEVEL, ALL_LEVEL]
 
 
 @dataclass
 class DeviceSummary:
-    """
-    This provides a mapping of what profiler labels should be included the in the profiler summary
-    based on the type of experiment. For example: ddp_communication is not recorded nor does it make
-    sense to include in the `single_gpu` experiment summary
-    """
-
-    # TODO: Instead of importing these here, flip it around: define the labels here and have the experiments import them
-    EXPERIMENT_PROFILER_OPERATION_LABELS = {
-        "single_gpu": single_gpu.EXPERIMENT_PROFILER_LABELS,
-        "ddp": torch_ddp.EXPERIMENT_PROFILER_LABELS,
-        "gpipe": torch_gpipe.EXPERIMENT_PROFILER_LABELS,
-        "tensor_parallel": tensor_parallel.EXPERIMENT_PROFILER_LABELS,
-    }
-
-    TRAINING_RESULTS_METRIC_TYPE = "training"
-    PROFILER_METRICS_TYPE = "profiler"
-    METRICS_MESSAGE_MAP = {
-        # TODO: The values feels fragile - we can probably tighten up the structural connection with the JSONL log files...
-        TRAINING_RESULTS_METRIC_TYPE: "Training results",
-        PROFILER_METRICS_TYPE: "Profiler metrics",
-    }
+    TRAINING_RESULTS_LOG_MESSAGE = "Training results"
 
     path: Path
     device_id: str
     strategy: str
     model_size: str
     run_id: str
-    metric_type: str
-    summary: Any
+    training_results: TrainingResults
 
     @property
     def experiment_key(self):
@@ -66,8 +52,7 @@ class DeviceSummary:
 
 
 class DeviceLogIterator:
-    def __init__(self, metric_type, files):
-        self.metric_type = metric_type
+    def __init__(self, files):
         self.files = files
 
     def __iter__(self):
@@ -78,37 +63,12 @@ class DeviceLogIterator:
             run_id = run_path.parts[-1]
             device_id = Path(fpath).stem
 
-            metrics = get_metrics(
-                fpath, DeviceSummary.METRICS_MESSAGE_MAP[self.metric_type]
+            training_results = TrainingResults()
+            training_metrics = get_metrics(
+                fpath, DeviceSummary.TRAINING_RESULTS_LOG_MESSAGE
             )
-            if not metrics:
-                continue
-
-            device_summary = None
-            if self.metric_type == DeviceSummary.TRAINING_RESULTS_METRIC_TYPE:
-                device_summary = TrainingResults.from_dict(metrics)
-            elif self.metric_type == DeviceSummary.PROFILER_METRICS_TYPE:
-                operation_labels = []
-                if "single_gpu" in strategy:
-                    operation_labels = (
-                        DeviceSummary.EXPERIMENT_PROFILER_OPERATION_LABELS["single_gpu"]
-                    )
-                elif "ddp" in strategy:
-                    operation_labels = (
-                        DeviceSummary.EXPERIMENT_PROFILER_OPERATION_LABELS["ddp"]
-                    )
-                elif "tensor_parallel" in strategy:
-                    operation_labels = (
-                        DeviceSummary.EXPERIMENT_PROFILER_OPERATION_LABELS[
-                            "tensor_parallel"
-                        ]
-                    )
-
-                profiler_summary = ProfilerSummary(operation_labels=operation_labels)
-                profiler_summary.update_from_profiler_metrics(
-                    metrics["profiler_metrics"]
-                )
-                device_summary = profiler_summary
+            if training_metrics:
+                training_results = TrainingResults.from_dict(training_metrics)
 
             yield DeviceSummary(
                 path=fpath,
@@ -116,8 +76,7 @@ class DeviceLogIterator:
                 strategy=strategy,
                 model_size=model_size,
                 run_id=run_id,
-                metric_type=self.metric_type,
-                summary=device_summary,
+                training_results=training_results,
             )
 
 
@@ -141,19 +100,14 @@ def main():
     parser.add_argument(
         "level",
         type=str,
-        choices=[DEVICE_LEVEL, EXPERIMENT_LEVEL],  # TODO: comparison
+        choices=LEVELS,
         help="The type of summary you want produced",
-    )
-    parser.add_argument(
-        "metric_type",
-        type=str,
-        choices=list(DeviceSummary.METRICS_MESSAGE_MAP.keys()),
-        help="The type of metric to extract and summarize.",
     )
     parser.add_argument("--files", nargs="*", default=[], help="List of files")
     parser.add_argument(
         "--dir", type=str, required=False, help="Directory containing rank JSONL files."
     )
+    parser.add_argument("--baseline", type=str, required=False, help="")
     args = parser.parse_args()
 
     if not args.files and not args.dir:
@@ -172,15 +126,106 @@ def main():
             f"No JSONL files found in files: {args.files} / dir: {args.dir}"
         )
 
-    dev_log_iterator = DeviceLogIterator(args.metric_type, all_files)
+    dev_log_iterator = list(DeviceLogIterator(all_files))
     if args.level == DEVICE_LEVEL:
         for device_summary in dev_log_iterator:
             print(
                 f"\n=== Results for experiment: {device_summary.device_experiment} ==="
             )
-            print(device_summary.summary.to_table())
+            print(device_summary.training_results.to_table())
     elif args.level == EXPERIMENT_LEVEL:
-        generate_experiment_summary(dev_log_iterator)
+        summary_by_run_key = generate_experiment_summary(dev_log_iterator)
+        for run_key, summary in summary_by_run_key.items():
+            print(f"\n=== Aggregated Results for {run_key} ===")
+            print(summary.to_table())
+    elif args.level == COMPARISON_LEVEL:
+        # Nice to have: pull the single gpu run for each strategy's model size dynamically...
+        if not args.baseline:
+            print(
+                "ERROR: You must provide a baseline file (--baseline) to compare against"
+            )
+            exit(1)
+
+        # This should throw execptions if the file does not exist
+        run_path = Path(args.baseline).parent
+        model_size = run_path.parts[-2]
+        strategy = run_path.parts[-3]
+        # TODO: With megatron - we can run the "tensor_parallel" experiment with nprocs=1 and get a "single GPU" baseline
+        # if strategy != "single_gpu":
+        #    print(f"ERROR: Baseilne files must be of strategy single_gpu: given {strategy}")
+        #    exit(1)
+
+        training_metrics = get_metrics(
+            args.baseline, DeviceSummary.TRAINING_RESULTS_LOG_MESSAGE
+        )
+        if not training_metrics:
+            print(f"ERROR: No training metrics found in {args.baseilne}")
+            exit(1)
+
+        baseline_results = TrainingResults.from_dict(training_metrics)
+        print(f"\n=== Baseline metrics of {strategy}/{model_size}")
+        print(baseline_results.to_table())
+
+        summary_by_run_key = generate_experiment_summary(dev_log_iterator)
+        for run_key, experiment_summary in summary_by_run_key.items():
+            comparison = ComparisonSummmary(baseline_results, experiment_summary)
+            print(
+                f"\n=== Comparison Results of {strategy}/{model_size} against {run_key} ({experiment_summary.n_devices} devices) ==="
+            )
+            print(comparison.to_table())
+    elif args.level == "all":
+        summary_by_run_key = generate_experiment_summary(dev_log_iterator)
+        baseline_summaries = {}
+        for run_key, experiment_summary in summary_by_run_key.items():
+            if "single_gpu" not in run_key:
+                continue
+            baseline_summaries[experiment_summary.model_size] = experiment_summary
+
+        with open("/tmp/all_metrics.csv", "w", newline="") as f:
+            columns = [
+                "model_size",
+                "strategy",
+                "num_devices",
+                "total_tokens",
+                "total_time_sec",
+                "throughput_tokens_sec",
+                "avg_gpu_mem_mb",
+                "total_gpu_mem_mb",
+                "avg_gpu_util_percent",
+                "relative_runtime_overhead_percent",
+                "ideal_scaling_throughput",
+                "throughput_scaling_factor",
+                "throughput_efficiency_percent",
+                "memory_scaling_factor",
+                "total_memory_scaling_factor",
+            ]
+            writer = csv.DictWriter(f, fieldnames=columns)
+            writer.writeheader()
+
+            for run_key, experiment_summary in summary_by_run_key.items():
+                baseline_summary = baseline_summaries[experiment_summary.model_size]
+                baseline_training_results = baseline_summary.training_results[0]
+                comparison = ComparisonSummmary(
+                    baseline_training_results, experiment_summary
+                )
+                row = {
+                    "model_size": experiment_summary.model_size,
+                    "strategy": experiment_summary.strategy,
+                    "num_devices": experiment_summary.n_devices,
+                    "total_tokens": baseline_training_results.total_tokens,
+                    "total_time_sec": experiment_summary.total_time_s,
+                    "throughput_tokens_sec": experiment_summary.total_throughput,
+                    "avg_gpu_mem_mb": experiment_summary.avg_gpu_mem_mb,
+                    "total_gpu_mem_mb": comparison.total_gpu_mem_mb,
+                    "avg_gpu_util_percent": experiment_summary.avg_gpu_util_percent,
+                    "relative_runtime_overhead_percent": comparison.relative_runtime_overhead_percent,
+                    "ideal_scaling_throughput": comparison.ideal_scaling_throughput,
+                    "throughput_scaling_factor": comparison.throughput_scaling_factor,
+                    "throughput_efficiency_percent": comparison.throughput_efficiency_percent,
+                    "memory_scaling_factor": comparison.memory_scaling_factor,
+                    "total_memory_scaling_factor": comparison.total_memory_scaling_factor,
+                }
+                writer.writerow(row)
 
 
 if __name__ == "__main__":

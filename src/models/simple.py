@@ -23,7 +23,7 @@ class TransformerBlock(nn.Module):
 
 
 class SimpleTransformerDecoder(nn.Module):
-    def __init__(self, vocab_size, d_model, n_heads, n_layers, d_ff, seq_len):
+    def __init__(self, vocab_size, d_model, n_heads, n_layers, d_ff, seq_len, dtype):
         super().__init__()
         self.tok_emb = nn.Embedding(vocab_size, d_model)
         self.pos_emb = nn.Parameter(torch.zeros(1, seq_len, d_model))
@@ -33,19 +33,20 @@ class SimpleTransformerDecoder(nn.Module):
         )
         self.ln_f = nn.LayerNorm(d_model)
         self.head = nn.Linear(d_model, vocab_size, bias=False)
+        self.dtype = dtype
 
     def forward(self, tokens):
         B, S = tokens.shape
         x = self.tok_emb(tokens) + self.pos_emb[:, :S, :]
         x = self.drop(x)
-        mask = self._causal_mask(S, x.device)
+        mask = self._causal_mask(S, x.device, self.dtype)
         for layer in self.layers:
             x = layer(x, mask)
         x = self.ln_f(x)
         return self.head(x)
 
     @staticmethod
-    def _causal_mask(seq_len, device):
+    def _causal_mask(seq_len, device, dtype):
         return torch.triu(torch.full((seq_len, seq_len), float("-inf")), diagonal=1).to(
-            device
+            device, dtype=dtype
         )

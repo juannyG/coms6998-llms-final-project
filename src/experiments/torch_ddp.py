@@ -20,11 +20,13 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 from datasets.synthetic import SyntheticDataset
+from tools.metrics.metrics_dataclasses import TrainingResults
 from utils.gpu import (
     gpu_memory_allocated,
     gpu_utilization_percent,
     reset_peak_mem,
 )
+from utils.logger import get_log_file_parent_dir
 
 MODEL_FORWARD_PROFILER_LABEL = "model_forward"
 MODEL_LOSS_PROFILER_LABEL = "model_loss"
@@ -35,10 +37,9 @@ EXPERIMENT_PROFILER_LABELS = [
     MODEL_LOSS_PROFILER_LABEL,
     MODEL_BACKWARD_PROFILER_LABEL,
     MODEL_OPTIMIZER_PROFILER_LABEL,
-
     # This label represents the pytorch "all-reduce" primitive that does comms in DDP
     # We can take "loss time" - "all-reduce" time to get "loss compute time"
-    "c10d::allreduce_"
+    "nccl:all_reduce",
 ]
 
 
@@ -63,7 +64,7 @@ def run_torch_ddp_experiment(model, conf, device, logger):
         sampler = DistributedSampler(dataset)
         loader = DataLoader(
             dataset,
-            batch_size=conf["batch_size"],
+            batch_size=conf["batch_size"] // dist.get_world_size(),
             shuffle=False,  # DistributedSampler is mutually exclusive from shuffle
             num_workers=2,
             pin_memory=True,
@@ -75,14 +76,17 @@ def run_torch_ddp_experiment(model, conf, device, logger):
         criterion = nn.CrossEntropyLoss()
 
         ddp_model.train()
-        step = total_tokens = 0
-        cur_mem = peak_mem = gpu_util = 0
-        token_throughputs = []
-        sample_throughputs = []
-        losses = []
+        step = 0
+        total_tokens = 0
+        cur_mem = 0
+        peak_mem = 0
+        gpu_util = 0
+        gpu_util_per_step = []
+        gpu_mem_per_step = []
+        loss = torch.Tensor([0])
+
         reset_peak_mem()
         t0 = time.perf_counter()
-        warmup = conf["warmup_steps"]
         max_steps = conf["max_steps"]
         it = iter(loader)
         for step in range(max_steps):
@@ -113,16 +117,12 @@ def run_torch_ddp_experiment(model, conf, device, logger):
 
             # metrics
             step_time = t_after - t_before
-            tokens = B * (S - 1)  # tokens processed for training step
-            samples = B
-            total_tokens += tokens
-            if step >= warmup:
-                token_throughputs.append(tokens / step_time)
-                sample_throughputs.append(samples / step_time)
-                losses.append(loss.item())
+            total_tokens += B * (S - 1)
 
             cur_mem, peak_mem = gpu_memory_allocated()
             gpu_util = gpu_utilization_percent()
+            gpu_mem_per_step.append(cur_mem)
+            gpu_util_per_step.append(gpu_util)
             if step % 10 == 0 or step == max_steps - 1:
                 logger.info(
                     "Training snapshot",
@@ -131,7 +131,6 @@ def run_torch_ddp_experiment(model, conf, device, logger):
                             "step": f"{step + 1}/{max_steps}",
                             "loss": f"{loss.item():.4f}",
                             "step_time_s": f"{step_time:.4f}",
-                            "tokens_per_s": f"{tokens / step_time:,.0f}",
                             "current_gpu_mem_MB": f"{cur_mem:.1f}",
                             "peak_gpu_mem_MB": f"{peak_mem:.1f}",
                             "gpu_util_percent": gpu_util,
@@ -140,39 +139,47 @@ def run_torch_ddp_experiment(model, conf, device, logger):
                 )
 
         total_time = time.perf_counter() - t0
-        avg_tokens_per_s = (
-            sum(token_throughputs) / len(token_throughputs) if token_throughputs else 0
-        )
-        avg_samples_per_s = (
-            sum(sample_throughputs) / len(sample_throughputs)
-            if sample_throughputs
-            else 0
-        )
-        avg_loss = sum(losses) / len(losses) if losses else None
+        total_throughput = total_tokens / total_time
 
+        avg_gpu_mem_mb = (
+            sum(gpu_mem_per_step) / len(gpu_mem_per_step) if gpu_mem_per_step else 0
+        )
+        avg_gpu_util_percent = (
+            sum(gpu_util_per_step) / len(gpu_util_per_step) if gpu_util_per_step else 0
+        )
+
+        training_results = TrainingResults(
+            total_tokens=total_tokens,
+            total_time_s=total_time,
+            total_throughput=total_throughput,
+            final_loss=loss.item(),
+            avg_gpu_mem_mb=avg_gpu_mem_mb,
+            peak_gpu_mem_mb=peak_mem,
+            avg_gpu_util_percent=avg_gpu_util_percent,
+        )
         logger.info(
             "Training results",
-            extra={
-                "extra": {
-                    "avg_tokens_per_s": avg_tokens_per_s,
-                    "avg_samples_per_s": avg_samples_per_s,
-                    "avg_loss": avg_loss,
-                    "total_tokens": total_tokens,
-                    "total_time_s": total_time,
-                    "cur_gpu_mem_mb": cur_mem,
-                    "peak_gpu_mem_mb": peak_mem,
-                    "gpu_util_percent": gpu_util,
-                }
-            },
+            extra={"extra": training_results.to_dict()},
         )
 
         # PROFILER EXAMPLE
         steps = 8
+        dir_name = get_log_file_parent_dir(logger)
+        worker_name = f"rank_{dist.get_rank()}"
         with profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-            profile_memory=True,
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            schedule=torch.profiler.schedule(wait=1, warmup=1, active=8, repeat=1),
+            on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                dir_name, worker_name=worker_name
+            ),
             record_shapes=True,
-            with_stack=False,
+            with_stack=True,
+            profile_memory=True,
+            with_flops=True,
+            with_modules=True,
         ) as prof:
             for i in range(steps):
                 try:
@@ -195,26 +202,7 @@ def run_torch_ddp_experiment(model, conf, device, logger):
                     loss.backward()
                 with record_function(MODEL_OPTIMIZER_PROFILER_LABEL):
                     optimizer.step()
-
-        profiler_metrics = {
-            "profiler_metrics": [
-                {
-                    "operation": k.key,
-                    "count": k.count,
-                    "cpu_memory_usage": k.cpu_memory_usage,
-                    "cpu_time_total": k.cpu_time_total,
-                    "device_memory_usage": k.device_memory_usage,
-                    "device_time_total": k.device_time_total,
-                    "device_type": str(k.device_type),
-                    "self_cpu_memory_usage": k.self_cpu_memory_usage,
-                    "self_cpu_time_total": k.self_cpu_time_total,
-                    "self_device_time_total": k.self_device_time_total,
-                    "self_device_memory_usage": k.self_device_memory_usage,
-                }
-                for k in prof.key_averages()
-            ]
-        }
-        logger.info("Profiler metrics", extra={"extra": profiler_metrics})
+                prof.step()
 
         if device.type == "cpu":
             print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
