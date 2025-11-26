@@ -97,7 +97,7 @@ def run_megatron_zero_experiment(_, conf, device, logger):
             exit(1)
 
         batch_size = conf["batch_size"]
-        ds_config["bf16"] = (conf["dtype"] == torch.bfloat16)
+        ds_config["bf16"] = {"enabled": conf["dtype"] == torch.bfloat16}
         ds_config["train_micro_batch_size_per_gpu"] = batch_size // world_size
 
         # wrap model with DeepSpeed engine in order to use ZeRO
