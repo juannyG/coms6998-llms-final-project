@@ -20,7 +20,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 import deepspeed
 
-from datasets.synthetic import SyntheticDataset
+from datasets.synthetic import MegatronSyntheticDataset
 from utils.gpu import (
     gpu_memory_allocated,
     gpu_utilization_percent,
@@ -108,8 +108,8 @@ def run_megatron_zero_experiment(_, conf, device, logger):
             config=ds_config,
         )
 
-        # Dataset / DataLoader (same SyntheticDataset as DDP)
-        dataset = SyntheticDataset(
+        # Dataset / DataLoader (same as megatron_ddp)
+        dataset = MegatronSyntheticDataset(
             n_samples=10000,
             seq_len=conf["seq_len"],
             vocab_size=conf["vocab_size"],
@@ -155,15 +155,17 @@ def run_megatron_zero_experiment(_, conf, device, logger):
                 it = iter(loader)
                 batch = next(it)
 
-            batch = batch.to(device, non_blocking=True)
-
+            tokens = batch["tokens"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            position_ids = batch["position_ids"].to(device)
             model_engine.zero_grad()
 
             if device.type.startswith("cuda"):
                 torch.cuda.synchronize()
             t_before = time.perf_counter()
 
-            logits = model_engine(batch)  # (B, S, V)
+
+            logits = model_engine(tokens, position_ids, attention_mask)
             logits = logits[:, :-1, :].contiguous().view(-1, logits.size(-1))
             targets = batch[:, 1:].contiguous().view(-1)
 
