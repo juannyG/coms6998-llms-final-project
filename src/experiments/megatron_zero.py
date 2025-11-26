@@ -69,7 +69,7 @@ def run_megatron_zero_experiment(_, conf, device, logger):
 
     rank = dist.get_rank()
     world_size = dist.get_world_size()
-    parallel_state.initialize_model_parallel() # Defaults tp=pp=1
+    parallel_state.initialize_model_parallel()  # Defaults tp=pp=1
 
     try:
         model_parallel_cuda_manual_seed(123)
@@ -88,6 +88,7 @@ def run_megatron_zero_experiment(_, conf, device, logger):
         )
         gpt_model.to(device=device, dtype=conf["dtype"])
 
+        ds_config = {}
         cfg_path = os.environ.get("ZERO_CONFIG")
         if cfg_path:
             with open(cfg_path, "r") as f:
@@ -159,17 +160,16 @@ def run_megatron_zero_experiment(_, conf, device, logger):
             attention_mask = batch["attention_mask"].to(device)
             position_ids = batch["position_ids"].to(device)
             labels = batch["labels"].to(device)
-            loss_mask = batch["loss_mask"].to(device)
             model_engine.zero_grad()
 
             if device.type.startswith("cuda"):
                 torch.cuda.synchronize()
             t_before = time.perf_counter()
 
-            output_tensor = model_engine(tokens, position_ids, attention_mask, labels=labels)
-            losses = output_tensor.float()
-            loss_mask = loss_mask.view(-1).float()
-            loss = torch.sum(losses.view(-1) * loss_mask) / loss_mask.sum()
+            logits = model_engine(tokens, position_ids, attention_mask)
+            logits = logits[:, :-1].contiguous().view(-1, logits.size(-1))
+            targets = labels[:, 1:].contiguous().view(-1)
+            loss = criterion(logits, targets)
             model_engine.backward(loss)
             model_engine.step()
 
@@ -179,7 +179,9 @@ def run_megatron_zero_experiment(_, conf, device, logger):
 
             # metrics
             step_time = t_after - t_before
-            total_tokens += (ds_config["train_micro_batch_size_per_gpu"] * conf["seq_len"])
+            total_tokens += (
+                ds_config["train_micro_batch_size_per_gpu"] * conf["seq_len"]
+            )
 
             cur_mem, peak_mem = gpu_memory_allocated()
             gpu_util = gpu_utilization_percent()
@@ -257,13 +259,13 @@ def run_megatron_zero_experiment(_, conf, device, logger):
                 attention_mask = batch["attention_mask"].to(device)
                 position_ids = batch["position_ids"].to(device)
                 labels = batch["labels"].to(device)
-                loss_mask = batch["loss_mask"].to(device)
                 with record_function(MODEL_FORWARD_PROFILER_LABEL):
-                    output_tensor = model_engine(tokens, position_ids, attention_mask, labels=labels)
+                    logits = model_engine(tokens, position_ids, attention_mask)
 
-                losses = output_tensor.float()
-                loss_mask = loss_mask.view(-1).float()
-                loss = torch.sum(losses.view(-1) * loss_mask) / loss_mask.sum()
+                logits = model_engine(tokens, position_ids, attention_mask)
+                logits = logits[:, :-1].contiguous().view(-1, logits.size(-1))
+                targets = labels[:, 1:].contiguous().view(-1)
+                loss = criterion(logits, targets)
                 with record_function(MODEL_BACKWARD_PROFILER_LABEL):
                     # all ZeRO comms (reduce-scatter/allgather) happen inside backward/step
                     model_engine.backward(loss)
@@ -283,5 +285,3 @@ def run_megatron_zero_experiment(_, conf, device, logger):
         # finally, clean up process group
         if dist.is_initialized():
             dist.destroy_process_group()
-
-
