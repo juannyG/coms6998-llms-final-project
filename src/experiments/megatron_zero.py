@@ -158,18 +158,18 @@ def run_megatron_zero_experiment(_, conf, device, logger):
             tokens = batch["tokens"].to(device)
             attention_mask = batch["attention_mask"].to(device)
             position_ids = batch["position_ids"].to(device)
+            labels = batch["labels"].to(device)
+            loss_mask = batch["loss_mask"].to(device)
             model_engine.zero_grad()
 
             if device.type.startswith("cuda"):
                 torch.cuda.synchronize()
             t_before = time.perf_counter()
 
-
-            logits = model_engine(tokens, position_ids, attention_mask)
-            logits = logits[:, :-1, :].contiguous().view(-1, logits.size(-1))
-            targets = batch[:, 1:].contiguous().view(-1)
-
-            loss = criterion(logits, targets)
+            output_tensor = model_engine(tokens, position_ids, attention_mask, labels=labels)
+            losses = output_tensor.float()
+            loss_mask = loss_mask.view(-1).float()
+            loss = torch.sum(losses.view(-1) * loss_mask) / loss_mask.sum()
             model_engine.backward(loss)
             model_engine.step()
 
@@ -249,19 +249,21 @@ def run_megatron_zero_experiment(_, conf, device, logger):
                     it = iter(loader)
                     batch = next(it)
 
-                batch = batch.to(device, non_blocking=True)
                 model_engine.zero_grad()
                 if device.type.startswith("cuda"):
                     torch.cuda.synchronize()
 
+                tokens = batch["tokens"].to(device)
+                attention_mask = batch["attention_mask"].to(device)
+                position_ids = batch["position_ids"].to(device)
+                labels = batch["labels"].to(device)
+                loss_mask = batch["loss_mask"].to(device)
                 with record_function(MODEL_FORWARD_PROFILER_LABEL):
-                    logits = model_engine(batch)
-                logits = logits[:, :-1, :].contiguous().view(-1, logits.size(-1))
-                targets = batch[:, 1:].contiguous().view(-1)
+                    output_tensor = model_engine(tokens, position_ids, attention_mask, labels=labels)
 
-                with record_function(MODEL_LOSS_PROFILER_LABEL):
-                    loss = F.cross_entropy(logits, targets)
-
+                losses = output_tensor.float()
+                loss_mask = loss_mask.view(-1).float()
+                loss = torch.sum(losses.view(-1) * loss_mask) / loss_mask.sum()
                 with record_function(MODEL_BACKWARD_PROFILER_LABEL):
                     # all ZeRO comms (reduce-scatter/allgather) happen inside backward/step
                     model_engine.backward(loss)
