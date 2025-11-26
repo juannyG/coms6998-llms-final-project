@@ -1,0 +1,24 @@
+# ZeRO-2 (shard optimizer states + gradients)
+train_micro_batch_size_per_gpu: 16
+gradient_accumulation_steps: 1
+bf16:
+  enabled: true
+fp16:
+  enabled: false
+
+zero_optimization:
+  stage: 2
+  overlap_comm: true
+  contiguous_gradients: true
+  reduce_scatter: true
+  reduce_bucket_size: 50000000
+  allgather_bucket_size: 50000000
+
+gradient_clipping: 1.0
+wall_clock_breakdown: true
+
+# activation_checkpointing:
+#   partition_activations: true
+#   contiguous_memory_optimization: true
+#   cpu_checkpointing: false
+
