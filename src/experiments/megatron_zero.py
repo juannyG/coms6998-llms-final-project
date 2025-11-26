@@ -166,6 +166,9 @@ def run_megatron_zero_experiment(_, conf, device, logger):
                 torch.cuda.synchronize()
             t_before = time.perf_counter()
 
+            # We need to compute loss manually so that the effects of ZeRO can be felt in the backward pass
+            # No labels=labels means we can compute loss manually: https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/models/gpt/gpt_model.py#L431
+            # https://github.com/NVIDIA/Megatron-LM/issues/1156
             logits = model_engine(tokens, position_ids, attention_mask)
             logits = logits[:, :-1].contiguous().view(-1, logits.size(-1))
             targets = labels[:, 1:].contiguous().view(-1)
