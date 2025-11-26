@@ -1,83 +1,46 @@
 import os
 import time
 import datetime
-from functools import partial
+from tools.metrics.metrics_dataclasses import TrainingResults
+from utils.logger import get_log_file_parent_dir
+import yaml
 
 import torch
-from torch.optim import Adam
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.distributed as dist
 from megatron.core import parallel_state
 from megatron.core.models.gpt.gpt_layer_specs import get_gpt_layer_local_spec
 from megatron.core.models.gpt.gpt_model import GPTModel
-from megatron.core.pipeline_parallel.schedules import get_forward_backward_func
 from megatron.core.tensor_parallel.random import model_parallel_cuda_manual_seed
 from megatron.core.transformer import TransformerConfig
-from torch.profiler import profile, record_function
+from torch.profiler import profile, record_function, ProfilerActivity
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
-from datasets.synthetic import MegatronSyntheticDataset
-from tools.metrics.metrics_dataclasses import TrainingResults
-from utils.device import get_device
+import deepspeed
+
+from datasets.synthetic import SyntheticDataset
 from utils.gpu import (
     gpu_memory_allocated,
     gpu_utilization_percent,
     reset_peak_mem,
 )
-from utils.logger import get_log_file_parent_dir
 
+# ---- Profiler labels -----------------
 MODEL_FORWARD_PROFILER_LABEL = "model_forward"
 MODEL_LOSS_PROFILER_LABEL = "model_loss"
-MODEL_FORWARD_BACKWARD_PROFILER_LABEL = "model_forward_backward"
+MODEL_BACKWARD_PROFILER_LABEL = "model_backward"
 MODEL_OPTIMIZER_PROFILER_LABEL = "model_optimizer_step"
-MODEL_FINALIZE_GRADIENTS_PROFILER_LABEL = "model_finalize_gradients"
 EXPERIMENT_PROFILER_LABELS = [
     MODEL_FORWARD_PROFILER_LABEL,
     MODEL_LOSS_PROFILER_LABEL,
-    MODEL_FORWARD_BACKWARD_PROFILER_LABEL,
+    MODEL_BACKWARD_PROFILER_LABEL,
     MODEL_OPTIMIZER_PROFILER_LABEL,
-    MODEL_FINALIZE_GRADIENTS_PROFILER_LABEL,
 ]
 
 
-def forward_step_func(data_iterator, gpt_model):
-    """
-    SEE: https://github.com/NVIDIA/Megatron-LM/blob/main/examples/run_simple_mcore_train_loop.py#L114
-
-    Forward step function that computes model output and returns loss function.
-
-    Args:
-        data_iterator: Iterator providing training batches.
-        model: The GPT model to train.
-
-    Returns:
-        Tuple of (output_tensor, loss_function) where loss_function is a partial
-        function that will compute the final loss when called.
-    """
-
-    def loss_func(loss_mask, output_tensor):
-        with record_function(MODEL_LOSS_PROFILER_LABEL):
-            losses = output_tensor.float()
-            loss_mask = loss_mask.view(-1).float()
-            loss = torch.sum(losses.view(-1) * loss_mask) / loss_mask.sum()
-            # If you have data parallel reduce loss across data parallel groups.
-            # If pipeline parallel, loss computation is done only in last stage.
-
-            return loss, {"loss": loss}
-
-    device = get_device()
-    data = next(data_iterator)
-    tokens = data["tokens"].to(device)
-    attention_mask = data["attention_mask"].to(device)
-    position_ids = data["position_ids"].to(device)
-    labels = data["labels"].to(device)
-    loss_mask = data["loss_mask"].to(device)
-
-    with record_function(MODEL_FORWARD_PROFILER_LABEL):
-        output_tensor = gpt_model(tokens, position_ids, attention_mask, labels=labels)
-
-    return output_tensor, partial(loss_func, loss_mask)
-
-
-def run_tensor_parallel_experiment(_, conf, device, logger):
+def run_zero_experiment(_, conf, device, logger, zero_stage: int = 1, offload: bool = False):
     if device.type == "cpu" or not torch.cuda.is_available():
         print("Megatron experiments cannot be run on CPU devices. Exiting...")
         exit(1)
@@ -96,16 +59,17 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
     """
 
     parallel_state.destroy_model_parallel()
-    rank = int(os.environ["LOCAL_RANK"])
-    world_size = int(os.environ["WORLD_SIZE"])
-    torch.cuda.set_device(rank)
-    torch.distributed.init_process_group(
-        backend="nccl",
-        world_size=world_size,
-        rank=rank,
-        timeout=datetime.timedelta(seconds=30),
+
+    # Initialize distributed via DeepSpeed as opposed to megatron...
+    deepspeed.init_distributed(
+        dist_backend="nccl",
+        timeout=datetime.timedelta(seconds=180),
     )
-    parallel_state.initialize_model_parallel(tensor_model_parallel_size=world_size)
+    torch.cuda.set_device(device)
+
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
+    parallel_state.initialize_model_parallel() # Defaults tp=pp=1
 
     try:
         model_parallel_cuda_manual_seed(123)
@@ -124,29 +88,52 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
         )
         gpt_model.to(device=device, dtype=conf["dtype"])
 
-        # TODO: Remove these...
-        # print(gpt_model)
-        # print(f"Total parameters: {sum(p.numel() for p in gpt_model.parameters())}")
+        cfg_path = os.environ.get("ZERO_CONFIG")
+        if cfg_path:
+            with open(cfg_path, "r") as f:
+                ds_config = yaml.safe_load(f)
+        else:
+            print("ERROR: Missing ZERO_CONFIG env var")
+            exit(1)
 
-        optimizer = Adam(gpt_model.parameters())
+        batch_size = conf["batch_size"]
+        ds_config["bf16"] = (conf["dtype"] == torch.bfloat16)
+        ds_config["train_micro_batch_size_per_gpu"] = batch_size // world_size
 
-        dataset = MegatronSyntheticDataset(
+        # wrap model with DeepSpeed engine in order to use ZeRO
+        optimizer = torch.optim.AdamW(gpt_model.parameters(), lr=conf["lr"])
+        model_engine, _, _, _ = deepspeed.initialize(
+            model=gpt_model,
+            optimizer=optimizer,
+            config=ds_config,
+        )
+
+        # Dataset / DataLoader (same SyntheticDataset as DDP)
+        dataset = SyntheticDataset(
             n_samples=10000,
             seq_len=conf["seq_len"],
             vocab_size=conf["vocab_size"],
         )
+
+        sampler = DistributedSampler(
+            dataset,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=False,
+        )
         loader = DataLoader(
             dataset,
-            batch_size=conf["batch_size"],
-            shuffle=True,
-            num_workers=0,
+            batch_size=ds_config["train_micro_batch_size_per_gpu"],
+            shuffle=False,
+            num_workers=2,
             pin_memory=True,
+            sampler=sampler,
         )
-        it = iter(loader)
+        sampler.set_epoch(0)
 
-        forward_back_func = get_forward_backward_func()
+        criterion = nn.CrossEntropyLoss()
 
-        gpt_model.train()
+        model_engine.train()
         step = 0
         total_tokens = 0
         cur_mem = 0
@@ -159,38 +146,38 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
         reset_peak_mem()
         t0 = time.perf_counter()
         max_steps = conf["max_steps"]
-        n_microbatches = 1
-        micro_batch_size = conf["batch_size"]
-        for step in range(max_steps):
-            optimizer.zero_grad()
+        it = iter(loader)
 
-            torch.cuda.synchronize() if device.type.startswith("cuda") else None
+        for step in range(max_steps):
+            try:
+                batch = next(it)
+            except StopIteration:
+                it = iter(loader)
+                batch = next(it)
+
+            batch = batch.to(device, non_blocking=True)
+
+            model_engine.zero_grad()
+
+            if device.type.startswith("cuda"):
+                torch.cuda.synchronize()
             t_before = time.perf_counter()
 
-            losses_reduced = forward_back_func(
-                forward_step_func=forward_step_func,
-                data_iterator=it,
-                model=gpt_model,
-                num_microbatches=n_microbatches,
-                seq_length=conf["seq_len"],
-                micro_batch_size=micro_batch_size,
-                decoder_seq_length=conf["seq_len"],
-                forward_only=False,
-            )
-            # Might need this for DP?
-            #finalize_model_grads([gpt_model])
+            logits = model_engine(batch)  # (B, S, V)
+            logits = logits[:, :-1, :].contiguous().view(-1, logits.size(-1))
+            targets = batch[:, 1:].contiguous().view(-1)
 
-            optimizer.step()
+            loss = criterion(logits, targets)
+            model_engine.backward(loss)
+            model_engine.step()
 
-            torch.cuda.synchronize() if device.type.startswith("cuda") else None
+            if device.type.startswith("cuda"):
+                torch.cuda.synchronize()
             t_after = time.perf_counter()
 
             # metrics
             step_time = t_after - t_before
-            # We have to do things in a slightly different way, given that the dimensions are buried in the `forward_step_func` closure, but we can still compute tokens based on our parameters...
-            # These are constants, but, whatever - do it each time in the loop...
-            total_tokens += micro_batch_size * (conf["seq_len"] - 1) * n_microbatches
-            loss = losses_reduced[0]["loss"]
+            total_tokens += (ds_config["train_micro_batch_size_per_gpu"] * conf["seq_len"])
 
             cur_mem, peak_mem = gpu_memory_allocated()
             gpu_util = gpu_utilization_percent()
@@ -202,7 +189,7 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
                     extra={
                         "extra": {
                             "step": f"{step + 1}/{max_steps}",
-                            "loss": f"{losses_reduced[0]['loss'].item():.4f}",
+                            "loss": f"{loss.item():.4f}",
                             "step_time_s": f"{step_time:.4f}",
                             "current_gpu_mem_MB": f"{cur_mem:.1f}",
                             "peak_gpu_mem_MB": f"{peak_mem:.1f}",
@@ -254,28 +241,43 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
             with_modules=True,
         ) as prof:
             for i in range(steps):
-                optimizer.zero_grad()
+                try:
+                    batch = next(it)
+                except StopIteration:
+                    it = iter(loader)
+                    batch = next(it)
 
-                torch.cuda.synchronize() if device.type.startswith("cuda") else None
+                batch = batch.to(device, non_blocking=True)
+                model_engine.zero_grad()
+                if device.type.startswith("cuda"):
+                    torch.cuda.synchronize()
 
-                with record_function(MODEL_FORWARD_BACKWARD_PROFILER_LABEL):
-                    losses_reduced = forward_back_func(
-                        forward_step_func=forward_step_func,
-                        data_iterator=it,
-                        model=gpt_model,
-                        num_microbatches=1,
-                        seq_length=conf["seq_len"],
-                        micro_batch_size=conf["batch_size"],
-                        decoder_seq_length=conf["seq_len"],
-                        forward_only=False,
-                    )
+                with record_function(MODEL_FORWARD_PROFILER_LABEL):
+                    logits = model_engine(batch)
+                logits = logits[:, :-1, :].contiguous().view(-1, logits.size(-1))
+                targets = batch[:, 1:].contiguous().view(-1)
+
+                with record_function(MODEL_LOSS_PROFILER_LABEL):
+                    loss = F.cross_entropy(logits, targets)
+
+                with record_function(MODEL_BACKWARD_PROFILER_LABEL):
+                    # all ZeRO comms (reduce-scatter/allgather) happen inside backward/step
+                    model_engine.backward(loss)
 
                 with record_function(MODEL_OPTIMIZER_PROFILER_LABEL):
-                    optimizer.step()
+                    model_engine.step()
 
-                torch.cuda.synchronize() if device.type.startswith("cuda") else None
+                if device.type.startswith("cuda"):
+                    torch.cuda.synchronize()
 
                 prof.step()
 
+        if device.type == "cpu":
+            print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))
+
     finally:
-        torch.distributed.destroy_process_group()
+        # finally, clean up process group
+        if dist.is_initialized():
+            dist.destroy_process_group()
+
+

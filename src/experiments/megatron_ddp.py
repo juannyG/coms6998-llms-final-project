@@ -18,7 +18,7 @@ from torch.profiler import profile, record_function, ProfilerActivity
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-from datasets.synthetic import SyntheticDataset
+from datasets.synthetic import MegatronSyntheticDataset
 from tools.metrics.metrics_dataclasses import TrainingResults
 from utils.device import get_device
 from utils.gpu import (
@@ -40,23 +40,6 @@ EXPERIMENT_PROFILER_LABELS = [
     MODEL_OPTIMIZER_PROFILER_LABEL,
     MODEL_FINALIZE_GRADIENTS_PROFILER_LABEL,
 ]
-
-
-class MegatronSyntheticDataset(SyntheticDataset):
-    def __getitem__(self, idx):
-        tokens = super().__getitem__(idx)
-
-        # Create Megatron-expected format
-        # See: https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/datasets/gpt_dataset.py#L645-L661
-        return {
-            "tokens": tokens,
-            "attention_mask": torch.tril(
-                torch.ones((self.seq_len, self.seq_len), dtype=torch.bool)
-            ).unsqueeze(0),
-            "position_ids": torch.arange(self.seq_len, dtype=torch.long),
-            "labels": tokens.clone(),  # We need something...so just use the tokens...
-            "loss_mask": torch.ones(self.seq_len, dtype=torch.float),
-        }
 
 
 def forward_step_func(data_iterator, gpt_model):
