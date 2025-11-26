@@ -40,7 +40,7 @@ EXPERIMENT_PROFILER_LABELS = [
 ]
 
 
-def run_zero_experiment(_, conf, device, logger, zero_stage: int = 1, offload: bool = False):
+def run_megatron_zero_experiment(_, conf, device, logger):
     if device.type == "cpu" or not torch.cuda.is_available():
         print("Megatron experiments cannot be run on CPU devices. Exiting...")
         exit(1)

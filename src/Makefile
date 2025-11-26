@@ -2,10 +2,10 @@ PYTHON=python
 TRAIN_SCRIPT=run_experiment.py
 SINGLE_GPU_EXPERIMENT=tensor_parallel
 DDP_EXPERIMENT=megatron_ddp
-PP_EXPERIMENT=megatron_pipeline_parallel # STILL NEEDS PROFILER ADDITION
+PP_EXPERIMENT=megatron_pipeline_parallel
 TP_EXPERIMENT=tensor_parallel
+ZERO_EXPERIMENT=megatron_zero
 LOG_PATH=../logs
-#ZERO_EXPERIMENT=zero
 
 .NOTPARALLEL:
 .PHONY: all single tp ddp pp zero
@@ -94,29 +94,95 @@ pp4_%:
 	RUN_ID=$$(date +%s) torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(PP_EXPERIMENT) $*
 
 
-# Need the other branch
-#
-#zero: zero2 zero3
-#
-#zero2: \
-#    zero2_4gpu_10m \
-#    zero2_4gpu_100m \
-#    zero2_4gpu_300m \
-#    zero2_4gpu_500m \
-#    zero2_4gpu_1b
-#
-#zero2_4gpu_%:
-# RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_2g_stage1.yaml torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
-#
-#zero3: \
-#    zero3_4gpu_10m \
-#    zero3_4gpu_100m \
-#    zero3_4gpu_300m \
-#    zero3_4gpu_500m \
-#    zero3_4gpu_1b
-#
-#zero3_4gpu_%:
-# RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_3g_stage1.yaml torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
+zero: zero1 zero2 zero3 zero3_offload
+
+zero1: zero1_2 zero1_4
+
+zero1_2: \
+	zero1_2gpu_10m \
+	zero1_2gpu_100m \
+	zero1_2gpu_300m \
+	zero1_2gpu_500m \
+	zero1_2gpu_1b
+
+zero1_2gpu_%:
+ RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_2g_stage1.yaml torchrun --nproc-per-node=2 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
+
+zero1_4: \
+	zero1_4gpu_10m \
+	zero1_4gpu_100m \
+	zero1_4gpu_300m \
+	zero1_4gpu_500m \
+	zero1_4gpu_1b
+
+zero1_4gpu_%:
+ RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_2g_stage1.yaml torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
+
+zero2: zero2_2 zero2_4
+
+zero2_2: \
+    zero2_2gpu_10m \
+    zero2_2gpu_100m \
+    zero2_2gpu_300m \
+    zero2_2gpu_500m \
+    zero2_2gpu_1b
+
+zero2_2gpu_%:
+ RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_2g_stage2.yaml torchrun --nproc-per-node=2 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
+
+zero2_4: \
+    zero2_4gpu_10m \
+    zero2_4gpu_100m \
+    zero2_4gpu_300m \
+    zero2_4gpu_500m \
+    zero2_4gpu_1b
+
+zero2_4gpu_%:
+ RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_2g_stage2.yaml torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
+
+zero3: zero3_2 zero3_4
+
+zero3_2: \
+    zero3_2gpu_10m \
+    zero3_2gpu_100m \
+    zero3_2gpu_300m \
+    zero3_2gpu_500m \
+    zero3_2gpu_1b
+
+zero3_2gpu_%:
+ RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_3g_stage3.yaml torchrun --nproc-per-node=2 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
+
+zero3_4: \
+    zero3_4gpu_10m \
+    zero3_4gpu_100m \
+    zero3_4gpu_300m \
+    zero3_4gpu_500m \
+    zero3_4gpu_1b
+
+zero3_4gpu_%:
+ RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_3g_stage3.yaml torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
+
+zero3_offload: zero3_offload_2 zero3_offload_4
+
+zero3_offload_2: \
+    zero3_offload_2gpu_10m \
+    zero3_offload_2gpu_100m \
+    zero3_offload_2gpu_300m \
+    zero3_offload_2gpu_500m \
+    zero3_offload_2gpu_1b
+
+zero3_offload_2gpu_%:
+ RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_3g_stage3_offload.yaml torchrun --nproc-per-node=2 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
+
+zero3_offload_4: \
+    zero3_offload_4gpu_10m \
+    zero3_offload_4gpu_100m \
+    zero3_offload_4gpu_300m \
+    zero3_offload_4gpu_500m \
+    zero3_offload_4gpu_1b
+
+zero3_offload_4gpu_%:
+ RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_3g_stage3_offload.yaml torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
 
 metrics_ddp: \
 	metrics_ddp_10m \
@@ -148,8 +214,5 @@ metrics_tp_%:
 metrics_pp_%:
 	python tools/metrics/summary.py compare --baseline $(LOG_PATH)/single_gpu/$*/*/cuda_0.log --dir $(LOG_PATH)/megatron_pipeline_parallel/$*
 
-#metrics_zero_%:
-#	python tools/metrics/summary.py compare --baseline $(LOG_PATH)/single_gpu/$*/*/cuda_0.log --dir $(LOG_PATH)/TODO/$*
-
-
-
+metrics_zero_%:
+	python tools/metrics/summary.py compare --baseline $(LOG_PATH)/single_gpu/$*/*/cuda_0.log --dir $(LOG_PATH)/megatron_zero/$*

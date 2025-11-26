@@ -4,13 +4,23 @@ stalls due to comms. This explicitly sets the peer-to-peer/NCCL comms to occur o
 
 export NCCL_P2P_LEVEL=NVL
 """
+
 import argparse
 import os
 
 import torch
 
 from configs import CONF
-from experiments import single_gpu, torch_ddp, torch_gpipe, tensor_parallel, megatron_pipeline_parallel, megatron_ddp, zero
+from experiments import (
+    single_gpu,
+    torch_ddp,
+    torch_gpipe,
+    tensor_parallel,
+    megatron_pipeline_parallel,
+    megatron_ddp,
+    megatron_zero,
+    zero,
+)
 from models.simple import SimpleTransformerDecoder
 from utils.device import get_device
 from utils.logger import get_logger
@@ -26,6 +36,7 @@ EXPERIMENT_TYPES = {
     "tensor_parallel": tensor_parallel.run_tensor_parallel_experiment,
     "megatron_pipeline_parallel": megatron_pipeline_parallel.run_pipeline_parallel_experiment,
     "megatron_ddp": megatron_ddp.run_megatron_data_parallel_experiment,
+    "megatron_zero": megatron_zero.run_megatron_zero_experiment,
     "zero": zero.run_zero_experiment,
 }
 
@@ -47,7 +58,7 @@ if __name__ == "__main__":
         conf["n_layers"],
         conf["d_ff"],
         conf["seq_len"],
-        conf["dtype"]
+        conf["dtype"],
     )
 
     num_param = sum(p.numel() for p in model.parameters() if p.requires_grad)

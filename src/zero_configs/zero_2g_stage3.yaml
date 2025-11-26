@@ -14,9 +14,3 @@ zero_optimization:
 
 gradient_clipping: 1.0
 wall_clock_breakdown: true
-
-# activation_checkpointing:
-#   partition_activations: true
-#   contiguous_memory_optimization: true
-#   cpu_checkpointing: false
-

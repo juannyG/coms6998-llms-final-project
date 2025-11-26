@@ -1,4 +1,4 @@
-# ZeRO-1 (shard optimizer states); good baseline vs DDP on 2 GPUs
+# ZeRO-1 (shard optimizer states); good baseline vs DDP
 gradient_accumulation_steps: 1
 
 zero_optimization:
@@ -11,10 +11,3 @@ zero_optimization:
 
 gradient_clipping: 1.0
 wall_clock_breakdown: true             # adds DS timing to logs
-
-# optional knobs to uncomment to stress memory further:
-# activation_checkpointing:
-#   partition_activations: true
-#   contiguous_memory_optimization: true
-#   cpu_checkpointing: false
-
