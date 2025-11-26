@@ -150,7 +150,7 @@ zero3_2: \
     zero3_2gpu_1b
 
 zero3_2gpu_%:
-	RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_3g_stage3.yaml torchrun --nproc-per-node=2 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
+	RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_2g_stage3.yaml torchrun --nproc-per-node=2 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
 
 zero3_4: \
     zero3_4gpu_10m \
@@ -160,7 +160,7 @@ zero3_4: \
     zero3_4gpu_1b
 
 zero3_4gpu_%:
-	RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_3g_stage3.yaml torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
+	RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_2g_stage3.yaml torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
 
 zero3_offload: zero3_offload_2 zero3_offload_4
 
@@ -172,7 +172,7 @@ zero3_offload_2: \
     zero3_offload_2gpu_1b
 
 zero3_offload_2gpu_%:
-	RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_3g_stage3_offload.yaml torchrun --nproc-per-node=2 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
+	RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_2g_stage3_offload.yaml torchrun --nproc-per-node=2 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
 
 zero3_offload_4: \
     zero3_offload_4gpu_10m \
@@ -182,7 +182,7 @@ zero3_offload_4: \
     zero3_offload_4gpu_1b
 
 zero3_offload_4gpu_%:
-	RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_3g_stage3_offload.yaml torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
+	RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_2g_stage3_offload.yaml torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(ZERO_EXPERIMENT) $*
 
 metrics_ddp: \
 	metrics_ddp_10m \
