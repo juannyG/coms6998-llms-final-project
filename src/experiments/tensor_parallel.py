@@ -274,6 +274,8 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
             for i in range(steps):
                 optimizer.zero_grad()
 
+                torch.cuda.synchronize() if device.type.startswith("cuda") else None
+
                 with record_function(MODEL_FORWARD_BACKWARD_PROFILER_LABEL):
                     losses_reduced = forward_back_func(
                         forward_step_func=forward_step_func,
@@ -288,6 +290,8 @@ def run_tensor_parallel_experiment(_, conf, device, logger):
 
                 with record_function(MODEL_OPTIMIZER_PROFILER_LABEL):
                     optimizer.step()
+
+                torch.cuda.synchronize() if device.type.startswith("cuda") else None
 
                 prof.step()
 
