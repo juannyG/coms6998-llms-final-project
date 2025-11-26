@@ -286,20 +286,27 @@ def run_megatron_data_parallel_experiment(_, conf, device, logger):
             for i in range(steps):
                 optimizer.zero_grad()
 
+                torch.cuda.synchronize() if device.type.startswith("cuda") else None
+
                 with record_function(MODEL_FORWARD_BACKWARD_PROFILER_LABEL):
                     losses_reduced = forward_back_func(
                         forward_step_func=forward_step_func,
                         data_iterator=it,
                         model=ddp_model,
-                        num_microbatches=1,
+                        num_microbatches=n_microbatches,
                         seq_length=conf["seq_len"],
-                        micro_batch_size=conf["batch_size"],
+                        micro_batch_size=micro_batch_size,
                         decoder_seq_length=conf["seq_len"],
                         forward_only=False,
                     )
 
+                with record_function(MODEL_FINALIZE_GRADIENTS_PROFILER_LABEL):
+                    finalize_model_grads([ddp_model])
+
                 with record_function(MODEL_OPTIMIZER_PROFILER_LABEL):
                     optimizer.step()
+
+                torch.cuda.synchronize() if device.type.startswith("cuda") else None
 
                 prof.step()
 
