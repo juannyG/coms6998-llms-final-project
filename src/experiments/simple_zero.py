@@ -92,7 +92,7 @@ def run_zero_experiment(model, conf, device, logger):
         )
         loader = DataLoader(
             dataset,
-            batch_size=rank_batch_size,
+            batch_size=micro_batch_size,
             shuffle=False,
             num_workers=2,
             pin_memory=True,
