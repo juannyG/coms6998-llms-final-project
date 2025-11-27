@@ -65,10 +65,12 @@ def run_zero_experiment(model, conf, device, logger):
         ds_config["bf16"] = {"enabled": conf["dtype"] == torch.bfloat16}
         ds_config["train_micro_batch_size_per_gpu"] = micro_batch_size
 
-        # wrap model with DeepSpeed engine in order to use ZeRO; let it create the optimizer internally
+        # wrap model with DeepSpeed engine in order to use ZeRO
+        optimizer = torch.optim.AdamW(model.parameters(), lr=conf["lr"])
         model_engine, _, _, _ = deepspeed.initialize(
             model=model,
             model_parameters=model.parameters(),
+            optimizer=optimizer,
             config=ds_config,
         )
 
