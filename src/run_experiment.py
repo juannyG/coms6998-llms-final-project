@@ -4,13 +4,22 @@ stalls due to comms. This explicitly sets the peer-to-peer/NCCL comms to occur o
 
 export NCCL_P2P_LEVEL=NVL
 """
+
 import argparse
 import os
 
 import torch
 
 from configs import CONF
-from experiments import single_gpu, torch_ddp, torch_gpipe, tensor_parallel, megatron_pipeline_parallel, megatron_ddp, zero
+from experiments import (
+    megatron_ddp,
+    megatron_pipeline_parallel,
+    simple_single,
+    simple_zero,
+    #torch_ddp,
+    #torch_gpipe,
+    tensor_parallel, # AKA megatron_tp
+)
 from models.simple import SimpleTransformerDecoder
 from utils.device import get_device
 from utils.logger import get_logger
@@ -20,13 +29,13 @@ CWD = os.path.dirname(os.path.abspath(__file__))
 LOG_PATH = os.environ.get("LOG_PATH", os.path.join(CWD, "..", "logs"))
 
 EXPERIMENT_TYPES = {
-    "single_gpu": single_gpu.run_single_gpu_experiment,
-    "torch_ddp": torch_ddp.run_torch_ddp_experiment,
-    "torch_gpipe": torch_gpipe.run_torch_gpipe_experiment,
+    "simple_single": simple_single.run_single_gpu_experiment,
+    # "torch_ddp": torch_ddp.run_torch_ddp_experiment,
+    # "torch_gpipe": torch_gpipe.run_torch_gpipe_experiment,
     "tensor_parallel": tensor_parallel.run_tensor_parallel_experiment,
     "megatron_pipeline_parallel": megatron_pipeline_parallel.run_pipeline_parallel_experiment,
     "megatron_ddp": megatron_ddp.run_megatron_data_parallel_experiment,
-    "zero": zero.run_zero_experiment,
+    "simple_zero": simple_zero.run_zero_experiment,
 }
 
 
@@ -47,7 +56,7 @@ if __name__ == "__main__":
         conf["n_layers"],
         conf["d_ff"],
         conf["seq_len"],
-        conf["dtype"]
+        conf["dtype"],
     )
 
     num_param = sum(p.numel() for p in model.parameters() if p.requires_grad)
