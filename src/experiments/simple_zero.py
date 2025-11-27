@@ -61,7 +61,10 @@ def run_zero_experiment(model, conf, device, logger):
             exit(1)
 
         batch_size = conf["batch_size"]
-        micro_batch_size = batch_size // world_size
+        rank_batch_size = batch_size // world_size
+        micro_batch_size = rank_batch_size // ds_config["gradient_accumulation_steps"]
+        assert micro_batch_size > 0, "Global and rank batch size too small: ZeRO micro batch size = batch_size // (world size * GAS)"
+
         ds_config["bf16"] = {"enabled": conf["dtype"] == torch.bfloat16}
         ds_config["train_micro_batch_size_per_gpu"] = micro_batch_size
 
@@ -89,7 +92,7 @@ def run_zero_experiment(model, conf, device, logger):
         )
         loader = DataLoader(
             dataset,
-            batch_size=ds_config["train_micro_batch_size_per_gpu"],
+            batch_size=rank_batch_size,
             shuffle=False,
             num_workers=2,
             pin_memory=True,
@@ -144,7 +147,7 @@ def run_zero_experiment(model, conf, device, logger):
 
             # metrics
             step_time = t_after - t_before
-            total_tokens += micro_batch_size * (S - 1)
+            total_tokens += rank_batch_size * (S - 1)
 
             cur_mem, peak_mem = gpu_memory_allocated()
             gpu_util = gpu_utilization_percent()
