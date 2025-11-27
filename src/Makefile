@@ -23,7 +23,7 @@ simple_single: \
     simple_single_1b
 
 simple_single_%:
-	RUN_ID=$$(date +%s) python $(TRAIN_SCRIPT) $(SIMPLE_SINGLE_GPU_EXPERIMENT) $*; \
+	RUN_ID=$$(date +%s) python $(TRAIN_SCRIPT) $(SIMPLE_SINGLE_GPU_EXPERIMENT) $*
 
 single: \
     single_10m \
@@ -104,7 +104,7 @@ pp4: \
 pp4_%:
 	RUN_ID=$$(date +%s) torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(PP_EXPERIMENT) $*
 
-simple_zero: simple_zero1 simple_zero2 simple_zero3 simle_zero3_offload # TODO stage 2 / 3 /3-offlad
+simple_zero: simple_zero1 simple_zero2 simple_zero3 simple_zero3_offload
 
 # ZeRO Stage 1
 simple_zero1: simple_zero1_2gpu simple_zero1_4gpu
