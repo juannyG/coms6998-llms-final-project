@@ -60,9 +60,9 @@ def run_zero_experiment(model, conf, device, logger):
             print("ERROR: Missing ZERO_CONFIG env var")
             exit(1)
 
-        batch_size = conf["batch_size"]
-        rank_batch_size = batch_size // world_size
-        micro_batch_size = rank_batch_size // ds_config["gradient_accumulation_steps"]
+        batch_size = conf["batch_size"] # sequences per optimizer step across all GPUs
+        rank_batch_size = batch_size // world_size # sequences per optimizer step on each GPU
+        micro_batch_size = rank_batch_size // ds_config["gradient_accumulation_steps"] # sequences per microstep (gradient accum steps) on each GPU
         assert micro_batch_size > 0, "Global and rank batch size too small: ZeRO micro batch size = batch_size // (world size * GAS)"
 
         ds_config["bf16"] = {"enabled": conf["dtype"] == torch.bfloat16}
@@ -104,6 +104,7 @@ def run_zero_experiment(model, conf, device, logger):
 
         model_engine.train()
         step = 0
+        micro_step = 0
         total_tokens = 0
         cur_mem = 0
         peak_mem = 0
@@ -117,7 +118,10 @@ def run_zero_experiment(model, conf, device, logger):
         max_steps = conf["max_steps"]
         it = iter(loader)
 
-        for step in range(max_steps):
+        # Each iteration is a micro step, not a full training step like single GPU
+        # We need to do max_steps * GAS to get the same number of FULL steps we saw in single GPU
+        # We do more steps here, but work on the same number of tokens
+        for micro_step in range(max_steps * ds_config["gradient_accumulation_steps"]):
             try:
                 batch = next(it)
             except StopIteration:
@@ -126,8 +130,6 @@ def run_zero_experiment(model, conf, device, logger):
 
             batch = batch.to(device, non_blocking=True)
             _, S = batch.shape
-
-            model_engine.zero_grad()
 
             if device.type.startswith("cuda"):
                 torch.cuda.synchronize()
@@ -147,12 +149,13 @@ def run_zero_experiment(model, conf, device, logger):
 
             # metrics
             step_time = t_after - t_before
-            total_tokens += rank_batch_size * (S - 1)
+            total_tokens += micro_batch_size * (S - 1)
 
             cur_mem, peak_mem = gpu_memory_allocated()
             gpu_util = gpu_utilization_percent()
             gpu_mem_per_step.append(cur_mem)
             gpu_util_per_step.append(gpu_util)
+            step = micro_step // ds_config["gradient_accumulation_steps"]
             if step % 10 == 0 or step == max_steps - 1:
                 logger.info(
                     "Training snapshot",
@@ -164,6 +167,7 @@ def run_zero_experiment(model, conf, device, logger):
                             "current_gpu_mem_MB": f"{cur_mem:.1f}",
                             "peak_gpu_mem_MB": f"{peak_mem:.1f}",
                             "gpu_util_percent": gpu_util,
+                            # TODO: add zero stage...
                         }
                     },
                 )
@@ -218,7 +222,6 @@ def run_zero_experiment(model, conf, device, logger):
                     batch = next(it)
 
                 batch = batch.to(device, non_blocking=True)
-                model_engine.zero_grad()
 
                 if device.type.startswith("cuda"):
                     torch.cuda.synchronize()
