@@ -20,7 +20,6 @@ import abc
 from dataclasses import dataclass
 
 from tabulate import tabulate
-from torch.utils.data import non_deterministic
 
 
 class TabularMetric(abc.ABC):
@@ -80,7 +79,7 @@ class ExperimentSummary(TabularMetric):
     Aggregate TrainingResults for a particular strategy
 
     Total tokens
-        * In the case of DDP, all devices see DIFFERENT tokens, so we take the sum
+        * In the case of DDP + ZeRO, all devices see DIFFERENT tokens, so we take the sum
         * In the case of pipeline parallelism, the last device contains the "total" (the others have 0, so we can still take the sum)
         * In the case of tensor parallelism, all devices see the SAME tokens, so we choose one
     Total time is the maximum across devices
@@ -100,7 +99,6 @@ class ExperimentSummary(TabularMetric):
         model_size,
         n_devices,
         training_results=None,
-        profiler_results=None,
     ):
         self.strategy = strategy
         self.training_results = training_results or []
@@ -126,6 +124,7 @@ class ExperimentSummary(TabularMetric):
                 "torch_gpipe",  # See comment why we're summing here
                 "megatron_pipeline_parallel",  # See comment why we're summing here
                 "megatron_ddp",  # See comment why we're summing here
+                "simple_zero",  # See comment why we're summing here
             ]:  # TODO: Move these constants, fragile
                 self.total_tokens += tr.total_tokens
             else:

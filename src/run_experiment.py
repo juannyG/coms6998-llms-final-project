@@ -29,7 +29,7 @@ CWD = os.path.dirname(os.path.abspath(__file__))
 LOG_PATH = os.environ.get("LOG_PATH", os.path.join(CWD, "..", "logs"))
 
 EXPERIMENT_TYPES = {
-    "simple_single": simple_single.run_single_gpu_experiment,
+    "simple_single_gpu": simple_single.run_single_gpu_experiment,
     # "torch_ddp": torch_ddp.run_torch_ddp_experiment,
     # "torch_gpipe": torch_gpipe.run_torch_gpipe_experiment,
     "tensor_parallel": tensor_parallel.run_tensor_parallel_experiment,
