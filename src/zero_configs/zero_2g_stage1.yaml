@@ -1,10 +1,5 @@
 # ZeRO-1 (shard optimizer states); good baseline vs DDP on 2 GPUs
-train_micro_batch_size_per_gpu: 16     # match CONF["10m"]["batch_size"]
 gradient_accumulation_steps: 1
-bf16:
-  enabled: true                        # set to false if GPUs lack bf16
-fp16:
-  enabled: false
 
 zero_optimization:
   stage: 1
@@ -16,10 +11,3 @@ zero_optimization:
 
 gradient_clipping: 1.0
 wall_clock_breakdown: true             # adds DS timing to logs
-
-# optional knobs to uncomment to stress memory further:
-# activation_checkpointing:
-#   partition_activations: true
-#   contiguous_memory_optimization: true
-#   cpu_checkpointing: false
-

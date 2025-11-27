@@ -47,6 +47,7 @@ class MegatronSyntheticDataset(SyntheticDataset):
         
         # Create Megatron-expected format
         # See: https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/datasets/gpt_dataset.py#L645-L661
+        # We need to do something slightly different: MT PP expects the attention_mask to include a dimension of size # attention heads
         return {
             'tokens': tokens,
             'attention_mask': torch.tril(torch.ones(self.num_attention_heads, self.seq_len, self.seq_len, dtype=torch.bool)),
