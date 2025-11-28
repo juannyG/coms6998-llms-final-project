@@ -191,7 +191,7 @@ simple_zero3_offload_2gpu: \
 	simple_zero3_offload_2gpu_1b
 
 simple_zero3_offload_2gpu_%:
-	RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_2g_stage3.yaml torchrun --nproc-per-node=2 $(TRAIN_SCRIPT) $(SIMPLE_ZERO_EXPERIMENT) zero-$* --experiment-subtype stage3_offload
+	RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_2g_stage3_offload.yaml torchrun --nproc-per-node=2 $(TRAIN_SCRIPT) $(SIMPLE_ZERO_EXPERIMENT) zero-$* --experiment-subtype stage3_offload
 
 simple_zero3_offload_4gpu: \
 	simple_zero3_offload_4gpu_10m \
@@ -201,7 +201,7 @@ simple_zero3_offload_4gpu: \
 	simple_zero3_offload_4gpu_1b
 
 simple_zero3_offload_4gpu_%:
-	RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_2g_stage3.yaml torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(SIMPLE_ZERO_EXPERIMENT) zero-$* --experiment-subtype stage3_offload
+	RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_2g_stage3_offload.yaml torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(SIMPLE_ZERO_EXPERIMENT) zero-$* --experiment-subtype stage3_offload
 
 # Metrics runners
 metrics_ddp: \
