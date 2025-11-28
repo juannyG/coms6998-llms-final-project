@@ -46,6 +46,7 @@ if __name__ == "__main__":
     parser.add_argument("experiment_type", choices=list(EXPERIMENT_TYPES.keys()))
     parser.add_argument("model_configuration", choices=list(CONF.keys()))
     parser.add_argument("--dry-run", action="store_true", default=False)
+    parser.add_argument("--experiment-subtype", required=False, default='')
     args = parser.parse_args()
 
     conf = CONF[args.model_configuration]
@@ -84,7 +85,10 @@ if __name__ == "__main__":
         print(f"Using configuration: {conf}")
         print(f"Trainable parameters: {num_param}")
     else:
-        logger = get_logger(args.experiment_type, args.model_configuration, LOG_PATH)
+        exp_type_for_logger = args.experiment_type
+        if args.experiment_subtype:
+            exp_type_for_logger = f"{args.experiment_type}_{args.experiment_subtype}"
+        logger = get_logger(exp_type_for_logger, args.model_configuration, LOG_PATH)
         logger.info(
             "Starting experiment",
             extra={

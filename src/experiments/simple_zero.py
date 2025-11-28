@@ -60,6 +60,17 @@ def run_zero_experiment(model, conf, device, logger):
             print("ERROR: Missing ZERO_CONFIG env var")
             exit(1)
 
+        """
+        DeepSpeed does things a little differently especially when gradient_accumulation_steps > 1
+        See: https://www.deepspeed.ai/docs/config-json/#batch-size-related-parameters
+
+        We define GAS in the config and the micro_batch_size dynamically based on world size.
+
+        BUT - because GAS > 1, which means we're operating in "micro steps", that means we have to
+        do GAS times more steps to do the same number of FULL optimizer steps as seen by single GPU (200).
+
+        Modifying GAS makes the peak memory reduction more apparent - future work: is their an optimal GAS?
+        """
         batch_size = conf["batch_size"] # sequences per optimizer step across all GPUs
         rank_batch_size = batch_size // world_size # sequences per optimizer step on each GPU
         micro_batch_size = rank_batch_size // ds_config["gradient_accumulation_steps"] # sequences per microstep (gradient accum steps) on each GPU
@@ -69,11 +80,9 @@ def run_zero_experiment(model, conf, device, logger):
         ds_config["train_micro_batch_size_per_gpu"] = micro_batch_size
 
         # wrap model with DeepSpeed engine in order to use ZeRO
-        optimizer = torch.optim.AdamW(model.parameters(), lr=conf["lr"])
         model_engine, _, _, _ = deepspeed.initialize(
             model=model,
             model_parameters=model.parameters(),
-            optimizer=optimizer,
             config=ds_config,
         )
 
@@ -148,7 +157,7 @@ def run_zero_experiment(model, conf, device, logger):
             t_after = time.perf_counter()
 
             # metrics
-            step_time = t_after - t_before
+            step_time = t_after - t_before # NOTE: This is actually "micro_step_time" - but "per step" time isn't very important to us anyway
             total_tokens += micro_batch_size * (S - 1)
 
             cur_mem, peak_mem = gpu_memory_allocated()

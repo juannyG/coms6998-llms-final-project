@@ -1,5 +1,15 @@
 # ZeRO-3 + CPU offload (useful even on 1 GPU; also handy on tight VRAM)
-gradient_accumulation_steps: 1
+gradient_accumulation_steps: 4
+
+optimizer:
+  type: Adam
+  params:
+    lr: 0.001
+    betas:
+        - 0.8
+        - 0.999
+    eps: 0.00000001
+    weight_decay: 0.0000003
 
 zero_optimization:
   stage: 3
