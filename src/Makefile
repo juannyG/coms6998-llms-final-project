@@ -22,6 +22,7 @@ simple_single: \
     simple_single_500m \
     simple_single_1b
 
+# TODO EXPAND SO 300m/500m/1b use ZeRO config!
 simple_single_%:
 	RUN_ID=$$(date +%s) python $(TRAIN_SCRIPT) $(SIMPLE_SINGLE_GPU_EXPERIMENT) $*
 
@@ -151,7 +152,7 @@ simple_zero1_4gpu_500m:
 	RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_2g_stage1.yaml torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(SIMPLE_ZERO_EXPERIMENT) zero-500m --experiment-subtype stage1
 
 simple_zero1_4gpu_1b:
-	RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_2g_stage1.yaml torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(SIMPLE_ZERO_EXPERIMENT) 1b --experiment-subtype stage1
+	RUN_ID=$$(date +%s) ZERO_CONFIG=zero_configs/zero_2g_stage1.yaml torchrun --nproc-per-node=4 $(TRAIN_SCRIPT) $(SIMPLE_ZERO_EXPERIMENT) zero-1b --experiment-subtype stage1
 
 # ZeRO Stage 2
 simple_zero2: simple_zero2_2gpu simple_zero2_4gpu
