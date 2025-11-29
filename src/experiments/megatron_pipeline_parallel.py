@@ -126,6 +126,12 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
     )
     parallel_state.initialize_model_parallel(pipeline_model_parallel_size=world_size)
 
+
+    # We use world_size here, because world_size == # of stages
+    #n_microbatches = world_size # Worst case configuration
+    n_microbatches = world_size * 4 # "optimal" configuration, but we can't use it on models >=300M on 4 GPUs because they're batch sizes are too small
+    micro_batch_size = conf["batch_size"] // n_microbatches
+
     try:
         model_parallel_cuda_manual_seed(123)
         print(f"Rank {rank}: Set random seed")
@@ -159,7 +165,7 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
         )
         loader = DataLoader(
             dataset,
-            batch_size=conf["batch_size"] // world_size,
+            batch_size=micro_batch_size,
             shuffle=True,
             num_workers=0,
             pin_memory=True,
@@ -182,8 +188,6 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
         reset_peak_mem()
         t0 = time.perf_counter()
         max_steps = conf["max_steps"]
-        n_microbatches = world_size
-        micro_batch_size = conf["batch_size"] // n_microbatches
         for step in range(max_steps):
             optimizer.zero_grad()
 

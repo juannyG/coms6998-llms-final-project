@@ -88,7 +88,6 @@ class ExperimentSummary(TabularMetric):
     Avergage GPU memory is the average of the averages
     Total GPU memory is the sum of the averages - gives a sense of general memory requirements
     Peak GPU memory is the maximum across all the devices
-    Total peak GPU memory - gives a sense of the worst case memory requirements
     Average GPU utilization is the average of the averages
     Min average GPU utilization shows load balancing issues
     """
@@ -113,7 +112,6 @@ class ExperimentSummary(TabularMetric):
         self.avg_gpu_mem_mb = 0.0
         self.total_avg_gpu_mem_mb = 0.0
         self.peak_gpu_mem_mb = 0.0
-        self.total_peak_gpu_mem_mb = 0.0
         self.avg_gpu_util_percent = 0.0
         self.min_avg_gpu_util_percent = 0.0
 
@@ -133,7 +131,6 @@ class ExperimentSummary(TabularMetric):
             self.final_loss = max(tr.final_loss, self.final_loss)
             self.total_avg_gpu_mem_mb += tr.avg_gpu_mem_mb
             self.peak_gpu_mem_mb = max(tr.peak_gpu_mem_mb, self.peak_gpu_mem_mb)
-            self.total_peak_gpu_mem_mb += tr.peak_gpu_mem_mb
             self.avg_gpu_util_percent += tr.avg_gpu_util_percent
             self.min_avg_gpu_util_percent = min(
                 tr.avg_gpu_util_percent, self.min_avg_gpu_util_percent or 100
@@ -152,7 +149,6 @@ class ExperimentSummary(TabularMetric):
             ["Avg GPU Mem", f"{self.avg_gpu_mem_mb:.1f} MB"],
             ["Total avg GPU Mem", f"{self.total_avg_gpu_mem_mb:.1f} MB"],
             ["Peak GPU Mem", f"{self.peak_gpu_mem_mb:.1f} MB"],
-            ["Total peak GPU Mem", f"{self.total_peak_gpu_mem_mb:.1f} MB"],
             ["Avg GPU Utilization", f"{self.avg_gpu_util_percent:.2f}%"],
             ["Min avg GPU Utilization", f"{self.min_avg_gpu_util_percent:.2f}%"],
         ]
@@ -235,6 +231,11 @@ class ComparisonSummmary:
             self.baseline_results.avg_gpu_mem_mb
         )
 
+        self.peak_memory_scaling_factor = (
+            self.experiment_summary.peak_gpu_mem_mb
+            / self.baseline_results.peak_gpu_mem_mb
+        )
+
     def to_table(self):
         table = [
             ["Strategy", self.experiment_summary.strategy],
@@ -246,6 +247,7 @@ class ComparisonSummmary:
             ],
             ["Avg GPU Mem", f"{self.experiment_summary.avg_gpu_mem_mb:.2f} MB"],
             ["Total GPU Mem", f"{self.total_gpu_mem_mb:.2f} MB"],
+            ["Peak GPU Mem", f"{self.experiment_summary.peak_gpu_mem_mb:.2f} MB"],
             ["Avg GPU Util %", f"{self.experiment_summary.avg_gpu_util_percent:.2f}%"],
             [
                 "Relative Runtime Overhead",
@@ -256,5 +258,6 @@ class ComparisonSummmary:
             ["Throughput Efficiency", f"{self.throughput_efficiency_percent:.2f}%"],
             ["Memory Scaling Factor", f"{self.memory_scaling_factor:.2f}"],
             ["Total Memory Scaling Factor", f"{self.total_memory_scaling_factor:.2f}"],
+            ["Peak Memory Scaling Factor", f"{self.peak_memory_scaling_factor:.2f}"],
         ]
         return tabulate(table, headers=["Metric", "Value"], tablefmt="github")

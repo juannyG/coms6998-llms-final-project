@@ -105,6 +105,7 @@ def main():
         "--dir", type=str, required=False, help="Directory containing rank JSONL files."
     )
     parser.add_argument("--baseline", type=str, required=False, help="")
+    parser.add_argument("--target_file", type=str, required=False, help="")
     args = parser.parse_args()
 
     if not args.files and not args.dir:
@@ -171,6 +172,10 @@ def main():
             )
             print(comparison.to_table())
     elif args.level == "all":
+        if not args.target_file:
+            print("ERROR: No target file defined.")
+            exit(1)
+
         summary_by_run_key = generate_experiment_summary(dev_log_iterator)
         baseline_summaries = {}
         for run_key, experiment_summary in summary_by_run_key.items():
@@ -178,7 +183,7 @@ def main():
                 continue
             baseline_summaries[experiment_summary.model_size] = experiment_summary
 
-        with open("/tmp/all_metrics.csv", "w", newline="") as f:
+        with open(args.target_file, "w", newline="") as f:
             columns = [
                 "model_size",
                 "strategy",
@@ -188,6 +193,7 @@ def main():
                 "throughput_tokens_sec",
                 "avg_gpu_mem_mb",
                 "total_gpu_mem_mb",
+                "peak_gpu_mem_mb",
                 "avg_gpu_util_percent",
                 "relative_runtime_overhead_percent",
                 "ideal_scaling_throughput",
@@ -195,6 +201,7 @@ def main():
                 "throughput_efficiency_percent",
                 "memory_scaling_factor",
                 "total_memory_scaling_factor",
+                "peak_memory_scaling_factor",
             ]
             writer = csv.DictWriter(f, fieldnames=columns)
             writer.writeheader()
@@ -214,6 +221,7 @@ def main():
                     "throughput_tokens_sec": experiment_summary.total_throughput,
                     "avg_gpu_mem_mb": experiment_summary.avg_gpu_mem_mb,
                     "total_gpu_mem_mb": comparison.total_gpu_mem_mb,
+                    "peak_gpu_mem_mb": experiment_summary.peak_gpu_mem_mb,
                     "avg_gpu_util_percent": experiment_summary.avg_gpu_util_percent,
                     "relative_runtime_overhead_percent": comparison.relative_runtime_overhead_percent,
                     "ideal_scaling_throughput": comparison.ideal_scaling_throughput,
@@ -221,6 +229,7 @@ def main():
                     "throughput_efficiency_percent": comparison.throughput_efficiency_percent,
                     "memory_scaling_factor": comparison.memory_scaling_factor,
                     "total_memory_scaling_factor": comparison.total_memory_scaling_factor,
+                    "peak_memory_scaling_factor": comparison.peak_memory_scaling_factor,
                 }
                 writer.writerow(row)
 
