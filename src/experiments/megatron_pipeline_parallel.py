@@ -129,7 +129,7 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
 
     # We use world_size here, because world_size == # of stages
     #n_microbatches = world_size # Worst case configuration
-    n_microbatches = world_size * 4 # "optimal" configuration, but we can't use it on models >=300M on 4 GPUs because they're batch sizes are too small
+    n_microbatches = world_size * 4 # "optimal" configuration - bumped batch size up to 32 across the board
     micro_batch_size = conf["batch_size"] // n_microbatches
 
     try:
