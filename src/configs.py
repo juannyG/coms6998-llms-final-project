@@ -98,4 +98,73 @@ CONF = {
         "max_steps": 200,
         "warmup_steps": 20,
     },
+    ##################################################################
+    # Slightly different set of configs for simple single + ZeRO runs
+    # Also - this keeps the Makefile a little tidier
+    ##################################################################
+    "zero-10m": {
+        "vocab_size": 8000,
+        "d_model": 320,
+        "n_heads": 8,
+        "n_layers": 4,
+        "d_ff": 1536,
+        "seq_len": 128,
+        "batch_size": 16,
+        "lr": 0.0002,
+        "dtype": torch.float32,
+        "max_steps": 200,
+        "warmup_steps": 20,
+    },
+    "zero-100m": {
+        "vocab_size": 8000,
+        "d_model": 768,
+        "n_heads": 12,
+        "n_layers": 12,
+        "d_ff": 4 * 768,
+        "seq_len": 512,
+        "batch_size": 16,
+        "lr": 2e-4,
+        "dtype": torch.bfloat16,
+        "max_steps": 200,
+        "warmup_steps": 20,
+    },
+    "zero-300m": {
+        "vocab_size": 8000,
+        "d_model": 1024,
+        "n_heads": 16,
+        "n_layers": 24,
+        "d_ff": 4 * 1024,
+        "seq_len": 1024,
+        "batch_size": 16,  # GAS = 4; max_world_size = 4; zero micro batch_size = batch_size / (world_size * GAS)
+        "lr": 2e-4,
+        "dtype": torch.bfloat16,
+        "max_steps": 200,
+        "warmup_steps": 20,
+    },
+    "zero-500m": {
+        "vocab_size": 8000,
+        "d_model": 1280,
+        "n_heads": 20,
+        "n_layers": 24,
+        "d_ff": 4 * 1280,
+        "seq_len": 1024,
+        "batch_size": 16,  # GAS = 4; max_world_size = 4; zero micro batch_size = batch_size / (world_size * GAS)
+        "lr": 2e-4,
+        "dtype": torch.bfloat16,
+        "max_steps": 200,
+        "warmup_steps": 20,
+    },
+    "zero-1b": {
+        "vocab_size": 8000,
+        "d_model": 1536,
+        "n_heads": 24,
+        "n_layers": 36,
+        "d_ff": 4 * 1536,
+        "seq_len": 512,  # For ZeRO, 1B needs to cut sequence to do batch_size of 16 on RTX A6000; seq len 1024 OOMs
+        "batch_size": 16,
+        "lr": 2e-4,
+        "dtype": torch.bfloat16,
+        "max_steps": 200,
+        "warmup_steps": 20,
+    },
 }

@@ -9,6 +9,8 @@ Usage:
     python tools/metrics/summary.py experiment --files ../logs/single_gpu/10m/1234567890/*
 
     python tools/metrics/summary.py compare --baseline ../logs/single_gpu/100m/7890123456/cuda_0.log--files ../logs/torch_ddp/100m/1234567890/
+
+    python tools/metrics/summary.py all --dir ../logs/ --target-file all_results.csv
 """
 
 import argparse
@@ -17,12 +19,9 @@ import json
 import glob
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-from experiments import single_gpu, torch_ddp, torch_gpipe, tensor_parallel
 from tools.metrics.experiment_summary import generate_experiment_summary
 from tools.metrics.metrics_dataclasses import ComparisonSummmary, TrainingResults
-from torch.types import Device
 
 DEVICE_LEVEL = "device"
 EXPERIMENT_LEVEL = "experiment"
@@ -108,6 +107,7 @@ def main():
         "--dir", type=str, required=False, help="Directory containing rank JSONL files."
     )
     parser.add_argument("--baseline", type=str, required=False, help="")
+    parser.add_argument("--target_file", type=str, required=False, help="")
     args = parser.parse_args()
 
     if not args.files and not args.dir:
@@ -174,6 +174,10 @@ def main():
             )
             print(comparison.to_table())
     elif args.level == "all":
+        if not args.target_file:
+            print("ERROR: No target file defined.")
+            exit(1)
+
         summary_by_run_key = generate_experiment_summary(dev_log_iterator)
         baseline_summaries = {}
         for run_key, experiment_summary in summary_by_run_key.items():
@@ -181,7 +185,7 @@ def main():
                 continue
             baseline_summaries[experiment_summary.model_size] = experiment_summary
 
-        with open("/tmp/all_metrics.csv", "w", newline="") as f:
+        with open(args.target_file, "w", newline="") as f:
             columns = [
                 "model_size",
                 "strategy",
@@ -191,6 +195,7 @@ def main():
                 "throughput_tokens_sec",
                 "avg_gpu_mem_mb",
                 "total_gpu_mem_mb",
+                "peak_gpu_mem_mb",
                 "avg_gpu_util_percent",
                 "relative_runtime_overhead_percent",
                 "ideal_scaling_throughput",
@@ -198,6 +203,7 @@ def main():
                 "throughput_efficiency_percent",
                 "memory_scaling_factor",
                 "total_memory_scaling_factor",
+                "peak_memory_scaling_factor",
             ]
             writer = csv.DictWriter(f, fieldnames=columns)
             writer.writeheader()
@@ -217,6 +223,7 @@ def main():
                     "throughput_tokens_sec": experiment_summary.total_throughput,
                     "avg_gpu_mem_mb": experiment_summary.avg_gpu_mem_mb,
                     "total_gpu_mem_mb": comparison.total_gpu_mem_mb,
+                    "peak_gpu_mem_mb": experiment_summary.peak_gpu_mem_mb,
                     "avg_gpu_util_percent": experiment_summary.avg_gpu_util_percent,
                     "relative_runtime_overhead_percent": comparison.relative_runtime_overhead_percent,
                     "ideal_scaling_throughput": comparison.ideal_scaling_throughput,
@@ -224,6 +231,7 @@ def main():
                     "throughput_efficiency_percent": comparison.throughput_efficiency_percent,
                     "memory_scaling_factor": comparison.memory_scaling_factor,
                     "total_memory_scaling_factor": comparison.total_memory_scaling_factor,
+                    "peak_memory_scaling_factor": comparison.peak_memory_scaling_factor,
                 }
                 writer.writerow(row)
 
