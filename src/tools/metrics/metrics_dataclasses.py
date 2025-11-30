@@ -117,7 +117,7 @@ class ExperimentSummary(TabularMetric):
 
     def build_summary(self):
         for tr in self.training_results:
-            if self.strategy in [
+            if 'simple_zero' in self.strategy or self.strategy in [
                 "torch_ddp",
                 "torch_gpipe",  # See comment why we're summing here
                 "megatron_pipeline_parallel",  # See comment why we're summing here

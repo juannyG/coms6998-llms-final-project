@@ -40,20 +40,27 @@ EXPERIMENT_PROFILER_LABELS = [
 class MegatronSyntheticDataset(SyntheticDataset):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.num_attention_heads = kwargs.get('num_attention_heads', 0)
+        self.num_attention_heads = kwargs.get("num_attention_heads", 0)
 
     def __getitem__(self, idx):
         tokens = super().__getitem__(idx)
-        
+
         # Create Megatron-expected format
         # See: https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/datasets/gpt_dataset.py#L645-L661
         # We need to do something slightly different: MT PP expects the attention_mask to include a dimension of size # attention heads
         return {
-            'tokens': tokens,
-            'attention_mask': torch.tril(torch.ones(self.num_attention_heads, self.seq_len, self.seq_len, dtype=torch.bool)),
-            'position_ids': torch.arange(self.seq_len, dtype=torch.long),
-            'labels': tokens.clone(), # We need something...so just use the tokens...
-            'loss_mask': torch.ones(self.seq_len, dtype=torch.float)
+            "tokens": tokens,
+            "attention_mask": torch.tril(
+                torch.ones(
+                    self.num_attention_heads,
+                    self.seq_len,
+                    self.seq_len,
+                    dtype=torch.bool,
+                )
+            ),
+            "position_ids": torch.arange(self.seq_len, dtype=torch.long),
+            "labels": tokens.clone(),  # We need something...so just use the tokens...
+            "loss_mask": torch.ones(self.seq_len, dtype=torch.float),
         }
 
 
@@ -119,17 +126,16 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
     world_size = int(os.environ["WORLD_SIZE"])
     torch.cuda.set_device(rank)
     torch.distributed.init_process_group(
-        backend='nccl',
+        backend="nccl",
         world_size=world_size,
         rank=rank,
-        timeout=datetime.timedelta(seconds=10)
+        timeout=datetime.timedelta(seconds=10),
     )
     parallel_state.initialize_model_parallel(pipeline_model_parallel_size=world_size)
 
-
     # We use world_size here, because world_size == # of stages
-    #n_microbatches = world_size # Worst case configuration
-    n_microbatches = world_size * 4 # "optimal" configuration - bumped batch size up to 32 across the board
+    n_microbatches = world_size  # Worst case configuration
+    # n_microbatches = world_size * 4 # "optimal" configuration - bumped batch size up to 32 across the board
     micro_batch_size = conf["batch_size"] // n_microbatches
 
     try:
@@ -151,7 +157,7 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
             vocab_size=conf["vocab_size"],
             max_sequence_length=conf["seq_len"],
             pre_process=(rank == 0),
-            post_process=(rank == world_size - 1)
+            post_process=(rank == world_size - 1),
         )
         gpt_model.to(device=device, dtype=conf["dtype"])
 
@@ -161,7 +167,7 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
             n_samples=10000,
             seq_len=conf["seq_len"],
             vocab_size=conf["vocab_size"],
-            num_attention_heads=conf["n_heads"]
+            num_attention_heads=conf["n_heads"],
         )
         loader = DataLoader(
             dataset,
@@ -216,7 +222,9 @@ def run_pipeline_parallel_experiment(_, conf, device, logger):
             # These are constants, but, whatever - do it each time in the loop...
             # Tweaked computation: Tokens per step = batch_size * (seq_len - 1) * num_microbatches
             if rank == world_size - 1:
-                total_tokens += micro_batch_size * (conf["seq_len"] - 1) * n_microbatches
+                total_tokens += (
+                    micro_batch_size * (conf["seq_len"] - 1) * n_microbatches
+                )
                 loss = losses_reduced[0]["loss"]
 
             cur_mem, peak_mem = gpu_memory_allocated()
