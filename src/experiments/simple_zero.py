@@ -127,10 +127,7 @@ def run_zero_experiment(model, conf, device, logger):
         max_steps = conf["max_steps"]
         it = iter(loader)
 
-        # Each iteration is a micro step, not a full training step like single GPU
-        # We need to do max_steps * GAS to get the same number of FULL steps we saw in single GPU
-        # We do more steps here, but work on the same number of tokens
-        for micro_step in range(max_steps * ds_config["gradient_accumulation_steps"]):
+        for step in range(max_steps):
             try:
                 batch = next(it)
             except StopIteration:
@@ -158,13 +155,12 @@ def run_zero_experiment(model, conf, device, logger):
 
             # metrics
             step_time = t_after - t_before # NOTE: This is actually "micro_step_time" - but "per step" time isn't very important to us anyway
-            total_tokens += micro_batch_size * (S - 1)
+            total_tokens += rank_batch_size * (S - 1)
 
             cur_mem, peak_mem = gpu_memory_allocated()
             gpu_util = gpu_utilization_percent()
             gpu_mem_per_step.append(cur_mem)
             gpu_util_per_step.append(gpu_util)
-            step = micro_step // ds_config["gradient_accumulation_steps"]
             if step % 10 == 0 or step == max_steps - 1:
                 logger.info(
                     "Training snapshot",
