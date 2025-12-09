@@ -113,7 +113,6 @@ def run_zero_experiment(model, conf, device, logger):
 
         model_engine.train()
         step = 0
-        micro_step = 0
         total_tokens = 0
         cur_mem = 0
         peak_mem = 0
@@ -154,7 +153,7 @@ def run_zero_experiment(model, conf, device, logger):
             t_after = time.perf_counter()
 
             # metrics
-            step_time = t_after - t_before # NOTE: This is actually "micro_step_time" - but "per step" time isn't very important to us anyway
+            step_time = t_after - t_before
             total_tokens += rank_batch_size * (S - 1)
 
             cur_mem, peak_mem = gpu_memory_allocated()
