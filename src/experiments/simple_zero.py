@@ -61,13 +61,8 @@ def run_zero_experiment(model, conf, device, logger):
             exit(1)
 
         """
-        DeepSpeed does things a little differently especially when gradient_accumulation_steps > 1
+        DeepSpeed does things a little differently especially when gradient_accumulation_steps > 1; be explicit
         See: https://www.deepspeed.ai/docs/config-json/#batch-size-related-parameters
-
-        We define GAS in the config and the micro_batch_size dynamically based on world size.
-
-        BUT - because GAS > 1, which means we're operating in "micro steps", that means we have to
-        do GAS times more steps to do the same number of FULL optimizer steps as seen by single GPU (200).
 
         Modifying GAS makes the peak memory reduction more apparent - future work: is their an optimal GAS?
         """
@@ -76,8 +71,9 @@ def run_zero_experiment(model, conf, device, logger):
         micro_batch_size = rank_batch_size // ds_config["gradient_accumulation_steps"] # sequences per microstep (gradient accum steps) on each GPU
         assert micro_batch_size > 0, "Global and rank batch size too small: ZeRO micro batch size = batch_size // (world size * GAS)"
 
-        ds_config["bf16"] = {"enabled": conf["dtype"] == torch.bfloat16}
+        ds_config["train_batch_size"] = batch_size
         ds_config["train_micro_batch_size_per_gpu"] = micro_batch_size
+        ds_config["bf16"] = {"enabled": conf["dtype"] == torch.bfloat16}
 
         # wrap model with DeepSpeed engine in order to use ZeRO
         model_engine, _, _, _ = deepspeed.initialize(
@@ -101,7 +97,7 @@ def run_zero_experiment(model, conf, device, logger):
         )
         loader = DataLoader(
             dataset,
-            batch_size=micro_batch_size,
+            batch_size=rank_batch_size,
             shuffle=False,
             num_workers=2,
             pin_memory=True,
@@ -113,7 +109,6 @@ def run_zero_experiment(model, conf, device, logger):
 
         model_engine.train()
         step = 0
-        micro_step = 0
         total_tokens = 0
         cur_mem = 0
         peak_mem = 0
@@ -127,10 +122,7 @@ def run_zero_experiment(model, conf, device, logger):
         max_steps = conf["max_steps"]
         it = iter(loader)
 
-        # Each iteration is a micro step, not a full training step like single GPU
-        # We need to do max_steps * GAS to get the same number of FULL steps we saw in single GPU
-        # We do more steps here, but work on the same number of tokens
-        for micro_step in range(max_steps * ds_config["gradient_accumulation_steps"]):
+        for step in range(max_steps):
             try:
                 batch = next(it)
             except StopIteration:
@@ -157,14 +149,13 @@ def run_zero_experiment(model, conf, device, logger):
             t_after = time.perf_counter()
 
             # metrics
-            step_time = t_after - t_before # NOTE: This is actually "micro_step_time" - but "per step" time isn't very important to us anyway
-            total_tokens += micro_batch_size * (S - 1)
+            step_time = t_after - t_before
+            total_tokens += rank_batch_size * (S - 1)
 
             cur_mem, peak_mem = gpu_memory_allocated()
             gpu_util = gpu_utilization_percent()
             gpu_mem_per_step.append(cur_mem)
             gpu_util_per_step.append(gpu_util)
-            step = micro_step // ds_config["gradient_accumulation_steps"]
             if step % 10 == 0 or step == max_steps - 1:
                 logger.info(
                     "Training snapshot",
