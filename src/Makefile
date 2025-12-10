@@ -105,7 +105,6 @@ simple_single: \
     simple_single_500m \
     simple_single_1b
 
-# TODO EXPAND SO 300m/500m/1b use ZeRO config!
 simple_single_%:
 	RUN_ID=$$(date +%s) python $(TRAIN_SCRIPT) $(SIMPLE_SINGLE_GPU_EXPERIMENT) zero-$*
 

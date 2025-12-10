@@ -61,13 +61,8 @@ def run_zero_experiment(model, conf, device, logger):
             exit(1)
 
         """
-        DeepSpeed does things a little differently especially when gradient_accumulation_steps > 1
+        DeepSpeed does things a little differently especially when gradient_accumulation_steps > 1; be explicit
         See: https://www.deepspeed.ai/docs/config-json/#batch-size-related-parameters
-
-        We define GAS in the config and the micro_batch_size dynamically based on world size.
-
-        BUT - because GAS > 1, which means we're operating in "micro steps", that means we have to
-        do GAS times more steps to do the same number of FULL optimizer steps as seen by single GPU (200).
 
         Modifying GAS makes the peak memory reduction more apparent - future work: is their an optimal GAS?
         """
@@ -76,8 +71,9 @@ def run_zero_experiment(model, conf, device, logger):
         micro_batch_size = rank_batch_size // ds_config["gradient_accumulation_steps"] # sequences per microstep (gradient accum steps) on each GPU
         assert micro_batch_size > 0, "Global and rank batch size too small: ZeRO micro batch size = batch_size // (world size * GAS)"
 
-        ds_config["bf16"] = {"enabled": conf["dtype"] == torch.bfloat16}
+        ds_config["train_batch_size"] = batch_size
         ds_config["train_micro_batch_size_per_gpu"] = micro_batch_size
+        ds_config["bf16"] = {"enabled": conf["dtype"] == torch.bfloat16}
 
         # wrap model with DeepSpeed engine in order to use ZeRO
         model_engine, _, _, _ = deepspeed.initialize(
@@ -101,7 +97,7 @@ def run_zero_experiment(model, conf, device, logger):
         )
         loader = DataLoader(
             dataset,
-            batch_size=micro_batch_size,
+            batch_size=rank_batch_size,
             shuffle=False,
             num_workers=2,
             pin_memory=True,
