@@ -19,10 +19,15 @@ PLOT_CHOICE_KWARGS_MAP = {
         "ylabel": "Peak GPU Memory (MB)",
         "title": "Peak Memory Savings vs Zero Stage",
     },
-    "throughput_penalty": {
+    "throughput": {
         "metric": "throughput_tokens_sec",
         "ylabel": "Throughput (tokens/sec)",
-        "title": "Throughput Penalty vs ZeRO Stage",
+        "title": "Throughput vs ZeRO Stage",
+    },
+    "throughput_eff": {
+        "metric": "throughput_efficiency_percent",
+        "ylabel": "Efficiency (%)",
+        "title": "Throughput Efficiency vs ZeRO Stage",
     },
 }
 
