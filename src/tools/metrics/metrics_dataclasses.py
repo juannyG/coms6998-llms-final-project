@@ -167,7 +167,7 @@ class ComparisonSummmary:
             • > 0%  --> multi-GPU is slower (bad)
             • < 0%  --> multi-GPU is faster (good)
         - Notes: This captures effective *end-to-end* overhead, including overlapped
-          communication/computation (used in MT-NLG 530B and DeepSpeed ZeRO).
+          communication/computation
 
     * Ideal Scaling Throughput (Shallue et al., 2018)
         - Computation: single_gpu_throughput * num_devices
