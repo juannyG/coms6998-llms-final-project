@@ -1,19 +1,6 @@
 """
 These dataclasses are meant to act as datamodel schemas for converting our
 different result types into things we can use across aggregation scripts.
-
-
-TODO: Look at traces for REAL communication delay
-* DDP
-  * all devices do identical all-reduce work
-* tensor parallel - same rules as DDP
-  * all devices do identical all-reduce (and/or sum + scatter) work
-* gpipe/pipeline parallelism
-  * Different devices have different communication patterns (send-only, recv-only, send+recv)
-  * Need to look at rank 0, intermediary rank, and last rank indepenently
-  * System bottleneck = the device with highest communication overhead
-* ZeRO
-  * TBD
 """
 
 import abc
