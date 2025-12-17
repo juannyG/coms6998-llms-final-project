@@ -51,7 +51,7 @@ Megatron, ZeRO
 
 \section{Introduction \& Motivation}
 
-The rapid scaling of large language models (LLMs) has made distributed training a fundamental requirement rather than an optimization. Modern transformer models routinely contain upwards of billions of parameters~\cite{grattafiori2024llama3herdmodels,workshop2023bloom176bparameteropenaccessmultilingual} and training them efficiently demands exploitation of their inherently parallelizable design~\cite{vaswani2023attentionneed}. While state-of-the-art training infrastructures often rely on specialized accelerators and high-bandwidth interconnects, a large fraction of academic labs, startups and independent researchers may find it difficult to operate on the same scale as enterprise labs given the expensive cost-per-accelerator and the architecture necessary for large-scale distributed training. As such, understanding how different distributed training strategies behave under resource-constrained environments is critical for making informed training decisions.
+The rapid scaling of large language models (LLMs) has made distributed training a fundamental requirement rather than an optimization. Modern transformer models routinely contain upwards of billions of parameters~\cite{grattafiori2024llama3herdmodels,workshop2023bloom176bparameteropenaccessmultilingual} and training them efficiently demands exploitation of their inherently parallelizable design~\cite{vaswani2023attentionneed}. While state-of-the-art training infrastructures often rely on specialized accelerators and high-bandwidth interconnects, a large fraction of academic labs, startups and independent researchers may find it difficult to operate on the same scale as enterprise labs given the expensive cost-per-accelerator and the architecture necessary for large-scale distributed training. Understanding how different distributed training strategies behave under resource-constrained environments is critical for making informed training decisions.
 
 Distributed training efficiency directly impacts the feasibility of LLM scaling. Poor parallelization choices can lead to excessive communication overhead, GPU under-utilization, memory fragmentation, or diminishing returns as the number of devices increases. Conversely, well-chosen strategies can unlock near-linear scaling even on relatively modest hardware. As models grow larger and training budgets remain constrained, the difference between effective and ineffective distributed training can determine whether an experiment is, at all, practical.
 
@@ -92,7 +92,7 @@ Total token counts are fixed for fairness across strategies and device counts su
 model size, the total tokens seen by a single GPU will be the total number of tokens seen by a group 
 of GPUs in a given strategy. The batch size in our configurations is the "global batch size." For data 
 parallelism and ZeRO, the effective batch size that any one GPU sees is always the batch  size configured 
-divided by the number of devices, aka the WORLD SIZE. For tensor parallelism, all devices need to see the 
+divided by the number of devices, aka the world size. For tensor parallelism, all devices need to see the 
 same input, so all devices use the global batch size. Finally for pipeline parallelism, each device sees microbatches calculated from the global batch.
 
 \subsection{Tensor, Pipeline, Data Parallelism}
@@ -140,8 +140,8 @@ sharding parameters via ZeRO. While there is Megatron-DeepSpeed~\cite{deepspeed-
 require significant restructuring of our training loop. Instead, we opted to create a simple transformer 
 decoder that ZeRO could operate with. We took a separate set of single GPU baseline measurements with this 
 lightweight, GPT-like model and provide an independent analysis of ZeRO stages 1, 2, 3, and 
-3-offload~\cite{zero-offload} on 2 and 4 GPUs for completeness. We do not compare the results of ZeRO 
-against the other three distributed training strategies.
+3-offload~\cite{zero-offload} on 2 and 4 GPUs for completeness. Because of these fundamental differences, 
+we do not compare the results of ZeRO against the other three distributed training strategies.
 
 The lightweight \textit{SimpleTransformerDecoder} model follows standard decoder structures using PyTorch 
 primitives. Unlike Megatron's \textit{GPTModel}, this implementation uses standard PyTorch 
@@ -188,53 +188,18 @@ utilization patterns in the different strategies. The remaining steps provide en
 averages and meaningful statistical sampling. GPU memory would peak early and then stabilize. This 
 stability should provide deeper credence to our scaling analysis.
 
-All experiments follow a similar workflow on every device:
-\begin{enumerate}
-    \item Launch with \textit{torchrun} and a model configuration reference (e.g. "10M", "300M")
-    \item Create a logger for the particular run
-    \item Configure the model with the given configuration reference
-    \item Initialize any required distributed protocol mechanisms
-    \item Prepare a data loader with our synthetic dataset
-    \item Initialize the optimizer
-    \item Run a training loop for 200 steps
-    \item Every iteration, take a snapshot of GPU memory and utilization
-\end{enumerate}
-
-After 200 iterations, total throughput, average GPU memory usage, peak GPU memory, and average GPU 
-utilization per device is logged. These per-device results are the foundational metrics that all
-of our results are derived from. Finally, 8 more steps are executed using PyTorch's profiler, to monitor 
-all CPU and GPU activity. While our experiments still generate the traces for more granular measurements, 
-we were unable to incorporate this data due to time restrictions.
-
-We took care early on to make sure that the log file paths were clear and that the per device logs could 
-be easily aggregated. This was achieved by using properties of the experiment as nested directories. The 
-files containing raw metrics followed the \texttt{cuda\_N.log} naming pattern, where \textit{N} is the 
-device's assigned "rank." Using the model size, strategy, and a unique timestamp for the folder structure 
-allowed for clearly identifiable experimental results. The folder structure template is \texttt{/log/path/
-<strategy>/<model\_size>/<timestamp>/}, e.g. \texttt{megatron\_ddp/10m/1234567890/cuda\_1.log}
-
-In the training loop, all experiments follow the same general pattern:
-\begin{enumerate}
-    \item Zero out gradients of the optimizer
-    \item Synchronize devices via torch.cuda's \textit{synchronize()}
-    \item Run a forward pass
-    \item Compute loss
-    \item Run the optimizer's step
-    \item Synchronize devices once again via torch.cuda's \textit{synchronize()}
-\end{enumerate}
-
 To properly capture the end-to-end iteration step-time of a particular strategy, our primary measurement 
 is wall-clock time. Using PyTorch's device synchronization mechanism allows us to measure both compute and 
 communication overhead of a strategy, per device, per step, by forcing the CPU to wait until all queued 
 CUDA operations have completed. This approach captures the total cost of computation, coordination, and 
 communication. Furthermore, given the benefits of our fixed-shape dataset, we can focus on the question 
 of: what is the true training time for a particular strategy given a fixed set of tokens, devices, and 
-FLOPs?
+FLOPs? Training loop details can be found in Appendix \ref{app:trainingloops}.
 
 To compute throughput, we snapshot a timestamp just before the training loop begins and immediately after 
-it ends. Given the timing strategy described above, we can track the wall-clock time of the 200 
-iterations. With the number of training steps, batch size, and sequence length, we know the 
-total number of tokens a strategy will see. This is the basis of our throughput computation.
+it ends, providing the wall-clock time of the 200 iterations. With the number of training steps, batch 
+size, and sequence length, we know the total number of tokens a strategy will see. This is the basis of 
+our throughput computation.
 
 GPU memory and utilization were measured using NVIDIA's pyNVML~\cite{pyNVML}. Throughput and peak GPU 
 memory provide the most meaningful metrics to our study, but average GPU utilization also showed 
@@ -268,101 +233,16 @@ ZeRO-stage3  &Split        &Shard opt+grads+params \\
 \end{center}
 \end{table}
 
-\subsection{Megatron}
+\subsection{Megatron Strategies}
 As stated earlier, the tensor, pipeline, and data parallelism experiments leveraged Megatron's 
 \textit{GPTModel}. These experiments are run using PyTorch's parallel process runner \textit{torchrun}.
 The \texttt{--nproc-per-node} argument controls the number of devices to use in the experiment, also
-referred to as the "world size."
-
-The three experimental files that leverage the Megatron \textit{GPTModel} are
-\begin{itemize}
-    \item \texttt{tensor\_parallel.py}
-    \item \texttt{megatron\_pipeline\_parallel.py}
-    \item \texttt{megatron\_ddp.py}
-\end{itemize}
-
-These scripts were heavily inspired by the \texttt{run\_simple\_mcore\_train\_loop.py}~
-\cite{mcore-train-loop-script} in NVIDIA's Megatron User Guide~\cite{megatron-user-guide}. This was 
-necessary given how drastically differently Megatron prefers to operate compared to PyTorch. Following 
-NVIDIA's example, the first thing any Megatron driven experiment does is tear down any previous parallel
-states. Our experiments only ever run one type of Megatron model-parallel grouping, so this is more a 
-matter of correctness and defensiveness. Next, we initialize the distributed process group to use the
-NCCL backend. Now, with each device aware of the world size and their respective rank, the specific 
-model-parallel grouping can be initialized for the particular Megatron parallelism (Table 
-\ref{tab:megatron_strat_conf}). By setting tensor or pipeline parallel size to 1 effectively disables it 
-from the experiment.
-
-\begin{table}[htbp]
-\caption{Megatron strategy configurations}
-\label{tab:megatron_strat_conf}
-\begin{center}
-\begin{tabular}{|c|c|c|}
-\hline
-\textbf{Parallelism} &\textbf{Tensor Parallel Size} &\textbf{Pipeline parallel size}\\
-\hline
-Data         &1          &1 \\
-\hline
-Tensor       &WORLD SIZE &1 \\
-\hline
-Pipeline     &1          &WORLD SIZE \\
-\hline
-\end{tabular}
-\end{center}
-\end{table}
-
-At this point the \textit{GPTModel} can be initialized with a corresponding \textit{TransformerConfig}. 
-The initialization values are driven by the configuration reference provided as an argument to the 
-experiment runner. The \textit{TransformerConfig} handles defining the hidden size, number of attention 
-heads, and the number of layers. The \textit{TransformerConfig} is then given to the \textit{GPTModel} 
-along with the vocabulary size and maximum sequence length.
-
-One other important note is how Megatron's training script configures the forward and backward passes. 
-Normally, in PyTorch, the model is called with an input batch, the logits are returned, and a loss 
-function is applied against the result and the expected values. The idea is similar in Megatron, but they 
-have a wrapper you must use (\textit{forward\_back\_func}) in which you must provide the model, the data 
-iterator, seq len, "micro batch size" (in the case of tensor parallelism, this is the global batch size; 
-data parallelism is $batch\_size \div WORLD SIZE$) and a \textit{forward\_step\_func} you define. This 
-callable takes the data iterator and an instance of your model as arguments. This is where you call the 
-model to get a resulting "output" tensor. You then return this output tensor and a python partial of your 
-loss function and the loss mask, which later, Megatron will call to allow you to compute the loss. This 
-loss function finally returns what your main training loop sees as the loss. This wrapping is likely due 
-to how Megatron is sharding the model across devices and how/when these functions can be called in order 
-to get a meaningful result back to the main training loop.
-
-The following sections describe the slight differences of each Megatron strategy.
-
-\subsubsection{Tensor Parallelism}
-
-This was the first experiment we built using the \textit{GPTModel}. One might also notice that it 
-is the only file that deviates from the \texttt{megatron\_*.py} naming convention. This was because we 
-originally started experimenting with the other strategies on the lightweight transformer decoder model 
-first. When we realized how drastically different Megatron-core behaved and how we could not simply 
-"wrap" our model with Megatron, we pivoted to an "all Megatron" approach, given the "out of the box" 
-support for the other distributed training strategies\footnote{With the exception of ZeRO, where we were 
-forced to reuse our lightweight model, given ZeRO and Megatron's incompatibility.}.
-
-In retrospect, tensor parallelism was one of the most straightforward strategies to implement, once we 
-understood how Megatron-core prefers to configure models and how it handles the forward and backward 
-passes. This experiment uses a PyTorch \textit{DataLoader} with batch size set to the global batch size, 
-per the experiment configuration. Every device must see the identical inputs at every step: each layer is 
-sharded across multiple devices and thus still needs the entire input set to be able to process the 
-forward pass. The tensor parallel size is set to the WORLD SIZE while the pipeline parallel size is set to 
-1 for all tensor parallelism experiments (Table \ref{tab:megatron_strat_conf}). The Megatron framework 
-handles how the weights of a layer are sharded across the devices, but they do support some level of 
-configuration as to how how the weights can be sharded.
-
-For tensor parallelism to function given the weight sharding, forward and backward passes require 
-communication:
-\begin{itemize}
-    \item Forward: activations are communicated via all-gather or reduce-scatter
-    \item Backward: gradients are communicated via all-reduce or reduce-scatter
-\end{itemize}
-The communication type is dependent on the layer type.
-
-When computing "total tokens" for throughput across multiple devices, because all devices see the same 
-batch size, but each step requires that all devices process the batch, we can take the total number of 
-tokens from any device in the experiment.
-
+referred to as the "world size." Tensor parallelism shards the weights across all available devices. This 
+requires an all-gather or reduce-scatter of activations and an all-reduce or reduce-scatter of gradients. 
+Data parallelism replicates the model across all devices and only requires an all-reduce of gradients. 
+Finally, pipeline parallelism assigns specific layers to specific devices, in order, and does peer-to-peer 
+communication of both activations and gradients. Configuration and implementation details can be 
+found in Appendix \ref{app:mtron-impl-details}
 
 \begin{table}[htbp]
 \caption{Communication Patterns Across Strategies\tablefootnote{AG = all-gather, RS = reduce-scatter, AR = all-reduce, P2P = point-to-point send/recv, acts = activations, grads = gradients, params 
@@ -390,89 +270,6 @@ ZeRO-3         &AG(params)     &RS(grads) \\
 \end{center}
 \end{table}
 
-\subsubsection{Data Parallelism}\label{sec:3.a.2-dp}
-
-Megatron follows a very similar pattern to PyTorch's data parallelism approach; they both provide a 
-\textit{DataDistributedParallel} wrapper that wraps your model to support data parallelism. The primary 
-difference is Megatron has a separate \textit{DataDistributedParallelConfig} that provides many features 
-to tweak and optimize how the data parallelism behaves. One important note is that Megatron provides a 
-"Distributed Optimizer" which you can enable in the configuration. This has the effect of making the 
-strategy behave similar to ZeRO-1 where the optimizer states is sharded across devices. We made sure not 
-to use this feature, to ensure that the data parallel experiment behaves in a traditional manner.
-
-Aside from this, the main difference between the tensor and data parallelism experiments is the data 
-loader used and its configured batch size. When doing distributed data parallelism, a PyTorch
-\textit{DistributedSampler} must be used and provided to the data loader. The data loader's 
-batch size is set to \textit{$batch\_size \div world\_size$}. This has the effect of lower memory (fewer 
-activations are stored compared to a single GPU baseline) and, in the case of smaller models, reducing 
-GPU utilization. This guarantees that the total number of tokens seen by the "world" matches 
-the total seen by the single GPU baseline, given that each device is processing a unique set of tokens. 
-For data parallelism, Megatron is configured with both tensor parallel and pipeline parallel sizes set to 1.
-(Table \ref{tab:megatron_strat_conf}).
-
-Unlike tensor parallelism, there is no communication necessary on the forward pass, as each device has the 
-entire model replicated and can operate completely independently of the other. However, on the backward 
-pass, an all-reduce on each parameter's gradients is required so that all devices apply the same optimizer 
-update.
-
-While we split the global batch size across the number of devices in data parallelism, each device 
-processes a unique set of tokens, so when we compute total tokens for the strategy, we actually take the 
-sum of "total tokens" across all devices.
-
-\subsubsection{Pipeline Parallelism}
-
-Pipeline parallelism is a strategy that differs quite a bit from the other two discussed strategies. 
-First, pipeline parallelism splits the layers in their entirety across available devices, e.g. layer 0 and 
-1 are on device 1, layer 2 and 3 are on device 2, etc. The grouping of layers are called "stages." The 
-Megatron framework handles how to separate the stages, although they do support customizing the 
-stages\footnote{We originally had a PyTorch implementation of GPipe with the 
-\textit{SimpleTransformerDecoder} model. PyTorch allows much more flexibility with how to load balance 
-stages, but that also comes with its own complexity cost - getting it right is not easy.}. However, this 
-is only for the transformer layers; you must define which device will handle the embeddings and the output 
-layer. We always make the first rank responsible for embeddings and the last rank responsible for the 
-output layer.
-
-Second, pipeline parallelism operates on "microbatches" of the original batch size. For both the forward 
-and backward pass of training, each device trains the model on these microbatches sequentially, i.e. 
-device 1 sees the first microbatch, then, while device 1 sees the second microbatch, device 2 begins work 
-on the first microbatch. After all devices complete the forward pass, the same sequence is done in reverse 
-for the backward pass.
-
-This inherently requires a scheduling algorithm. The first of such algorithms was GPipe~\cite{gpipe2018} 
-but Megatron does not use this. Instead, the scheduler used is 1F1B~\cite{1f1b}\footnote{This is the 
-default scheduler provided, which we used for our experiments. There is another interleaved 1F1B variant 
-available.}. The primary difference between 1F1B and GPipe is
-\begin{itemize}
-    \item GPipe: All devices do forward microbatches of batch, then all devices do backward microbatches of batch.
-    \item 1F1B: After reaching a "steady-state" of microbatches at the start, the algorithm alternates "one forward, one backward" pass until the end of the batch.
-\end{itemize}
-For the purposes of our study, this has no effect, as both GPipe and 1F1B are subject to the same "bubble 
-overhead" ratio: $(p - 1)/m$ where $p$ is the number of stages and $m$ is the number of microbatches. In 
-theory, pipeline performance increases when $m >> p$, but more practically the recommendation is generally 
-$m \approx 4p$. Conversely, the configuration that maximizes the bubble overhead is $m = p$, which we 
-later realized was the configuration we used in our experiments. With this in mind, we ran another set of 
-pipeline parallel experiments on 10M/100M/300M parameter models with a fixed sequence length of 512 and 
-batch size of 32 across all model sizes to determine if the performance results were due to our 
-configuration or because of the PCIe infrastructure. The 500M and 1B parameter models were not included, 
-as they generated out-of-memory errors with these sequence length and batch size values. We modified these 
-values to guarantee the configuration generated enough compute related stress on the GPU to make 
-communication beneficial and give the strategy the best opportunity to demonstrate its capabilities. 
-\S\ref{sec:exp-pp-side-quest} shows the results of this experiment.
-
-Given that each device is involved in the backward and forward pass, both passes require communication. 
-That said, pipeline parallelism only requires that each device communicates with its immediate neighboring 
-rank.
-\begin{itemize}
-    \item On the forward pass, the $i_n$ device sends activations to device $i_{n+1}$.
-    \item On the backward pass, the $i_n$ device sends gradients to device $i_{n-1}$.
-\end{itemize}
-
-We only compute the total number of tokens seen by the strategy at the last rank, as this rank is 
-responsible for starting the backward pass. Our logic was that the moment the backward pass begins on the 
-last rank, then all tokens have flowed from beginning to end. All previous ranks have their total tokens 
-value set to 0. The global batch size is preserved across microbatches; increasing the number of 
-microbatches reduces per-microbatch size but does not change total tokens processed per optimizer step.
-
 \subsection{ZeRO}
 Fundamentally, ZeRO is a form data parallelism, but with a focus on various forms of memory optimization. 
 The underlying framework that provides ZeRO's capabilities is \textit{deepspeed}. \textit{deepspeed} 
@@ -487,19 +284,6 @@ Each stage offers increasing memory reduction given that they work together addi
 shards gradients; stage 3 also shards model parameters. Stage 3-offload offloads the optimizer states, 
 gradients, and parameters to the CPU. Of course, each memory saving technique incurs a cost of throughput.
 
-During the initial set of ZeRO experiments, we observed that memory consumption appeared nearly unchanged 
-across ZeRO stages for smaller models. To further stress the optimizer-state sharding behavior and make 
-memory differences more apparent, we increased the global batch size used by all ZeRO configurations to 
-16. Achieving this global batch size on 2 and 4 GPU configurations required setting 
-\textit{gradient\_accumulation\_steps} (GAS) to 4, which produced per-GPU microbatch sizes of 2 (2 GPUs) and 1 (4 
-GPUs). This adjustment also required maintaining a separate set of ZeRO configurations from the one's used 
-with in our Megatron models. Note that ZeRO's "microbatches" are unrelated to pipeline parallelism's 
-microbatches.
-
-We later discovered a bug in our initial ZeRO training loop: we were executing $200 \times GAS$ iterations 
-instead of the planned 200 optimizer steps. After fixing the step-counting logic, we reran all ZeRO 
-experiments using the same configurations (e.g., batch size, GAS) without modifying any hyperparameters. All results reported in this paper reflect the corrected implementation.
-
 ZeRO stage 1 mimics data parallelism communication, where there needs to be an all-reduce of the gradients 
 on the backward pass. In stage 2, because both gradient and optimizer states are sharded, the backward 
 pass all-reduce becomes a reduce-scatter of the gradients. The reduce-scatter is a communication 
@@ -507,101 +291,21 @@ optimization because it is mathematically identical to doing an all-reduce and t
 gradient the GPU is responsible for, but less data is transferred. Finally, in stage 3, the forward pass 
 now needs to do an all-gather of parameters along with the previous stages backward pass communication. 
 Note, stage 2 and stage 3 is doing a reduce-scatter on every microstep, whereas stage 1 delays the 
-communication of the all-reduce until the optimizer step.
+communication of the all-reduce until the optimizer step. More implementation details about ZeRO-specific 
+configurations can be found in Appendix \ref{app:zero-conf-details}.
 
 \subsection{Single GPU Baselines}
 To generate the \textit{GPTModel} baseline we used our \textit{tensor\_parallel.py} experiment using 
-PyTorch's \textit{torchrun} command with \texttt{--nproc-per-node=1}. This sets the WORLD SIZE and the 
+PyTorch's \textit{torchrun} command with \texttt{--nproc-per-node=1}. This sets the world size and the 
 tensor parallel size to 1.
 
 For the ZeRO baselines, we had a separate python script with an identical training loop to the ZeRO 
 experiment which we run directly with \textit{python}.
 
-\subsection{Metric Aggregations}
+Final metrics are computed using aggregated per-device measurements following standard distributed 
+training practices; full aggregation definitions are provided in Appendix~\ref{app:derivations}.
 
-As mentioned in \S\ref{methodlogy}, experiment results were logged in a very specific manner: it 
-guarantees that all \textit{cuda\_N.log} files belong to the same experiment. We accomplished consistent 
-aggregations by implementing 3 data classes
-\begin{enumerate}
-    \item \textit{TrainingResults} - the metrics we log after 200 iterations, per device.
-    \item \textit{ExperimentSummary} - aggregate metrics given a list of \textit{TrainingResults} from a 
-    single experiment
-    \item \textit{ComparisonSummary} - comparative metrics given an \textit{ExperimentSummary} and a 
-    target baseline \textit{TrainingResults}
-\end{enumerate}
-
-\S\ref{methodlogy} went over the per device metrics that would be populated in \textit{TrainingResults}. 
-Our final results represent a combination of data from the \textit{ExperimentSummary} and 
-\textit{ComparisonSummary} aggregates. We now provide more depth into \textit{ExperimentSummary} and \textit{ComparisonSummary}.
-
-\subsubsection{ExperimentSummary}
-
-As mentioned across the different strategies in \S\ref{methodlogy}, the computation of "total tokens" is 
-strategy dependent: in the case of data parallelism and ZeRO, all devices see different tokens, so we 
-take the sum; for pipeline parallelism, the last device contains the "total" (the others have 0, so we can 
-still take the sum); for tensor parallelism, all devices see the same tokens, so we choose the max of all 
-devices, which has the same effect as picking a single device. 
-
-The rest of the aggregates are defined as:
-\begin{itemize}
-    \item Total time: the maximum time across the set of \textit{TrainingResults}
-    \item Total throughput: still total tokens $\div$ total time, as just defined in this context
-    \item Average GPU memory: the average across the \textit{TrainingResults} average GPU memory values
-    \item Total GPU memory: the sum across all \textit{TrainingResults} average GPU memory values
-    \item Peak GPU memory: the maximum peak across the set of \textit{TrainingResults}
-    \item Average GPU utilization: the average across the \textit{TrainingResults} average GPU utilization 
-    values
-\end{itemize}
-
-\subsubsection{ComparisonSummary}
-
-Given an \textit{ExperimentSummary} of multiple devices for a specific experiment type and a specific 
-single-GPU baseline, we will now define the following comparative metrics.
-
-First we compute the "relative runtime overhead." This tell us how much slower or faster the multi-GPU run 
-is compared to single GPU.
-
-\[ (\frac{TotalTime_{MultiGPU}}{TotalTime_{SingleGPU}} - 1) \times 100\]
-
-When $>$0\%, this indicates that the multi-GPU strategy is slower than the single GPU. When the overhead 
-percentages is $<$0\%, then the multi-GPU strategy is operating faster than the single GPU. This captures 
-effective end-to-end overhead, including overlapped communication and computation of the strategy/model/
-framework/etc. This metric is not meant to be a scaling metric. We introduce it as a direct way to measure 
-wall-clock speedup or slowdown.
-
-While Shallue et al. measured batch sizes~\cite{shallue2018}, it sets the basis for computing scaling 
-throughput and efficiencies. The ideal scaling throughput is straightforward, representing the throughput 
-expected under perfect linear scaling: $Throughput_{SingleGPU} \times N_{devices}$. To compute 
-the throughput efficiency, we first need the throughput scaling factor
-\[ \frac{Throughput_{MultiGPU}}{Throughput_{SingleGPU}} \]
-
-The interpretation of the throughput scaling factor is 
-\begin{itemize}
-    \item 1 means the strategy has the same speed as a single GPU
-    \item $<$1 means the strategy is slower than a single GPU
-    \item $>$1 means the strategy is faster than a single GPU
-    \item $\approx$ the number of devices is equivalent to ideal scaling
-\end{itemize}
-Throughput scaling efficiency is then defined by 
-\[ \frac{ThroughputScalingFactor}{N_{devices}} \times 100 \]
-
-When this percentage is 100\%, it means the throughput achieves perfect linear scaling. Efficiency values 
-$\sim$80\% are desirable whereas values $<$70\% indicate poor throughput performance.
-
-We also computed a number of memory scaling factors: average GPU memory, total GPU memory, and peak GPU 
-memory. All of them are computed in the same manner
-\[ \frac{MemoryType_{MultiGPU}}{MemoryType_{SingleGPU}} \]
-
-We interpret these metrics similar to the throughput scaling factor, such that values less than 1 indicate 
-less memory usage than a single GPU, values larger than 1 indicate more memory usage, and values near 1 
-indicate comparable memory usage.
-
-\section{Performance Tuning Methodology}
-Our survey does not perform hyperparameter or kernel-level performance tuning. Instead, we focus 
-exclusively on measuring the scaling behavior of established parallelization strategies under controlled 
-conditions. All model, optimizer, and training parameters were held constant across experiments to ensure 
-that differences in throughput and memory usage arise solely from the distributed training strategy rather 
-than algorithmic tuning.
+Our survey does not perform hyperparameter or kernel-level performance tuning. 
 
 \section{Experimental Results with analysis}
 
@@ -666,13 +370,19 @@ memory as expected, given how they decompose the model weights, showing even mor
 savings at 4 GPUs.
 
 While one would expect a higher memory footprint from data parallelism, due to its replication of the 
-model, the lower memory footprint is due to the fact that we split the batch size by WORLD SIZE in order 
+model, the lower memory footprint is due to the fact that we split the batch size by world size in order 
 to keep the total number of tokens in the experiment consistent. By decreasing the batch size, this 
 decreases activations and ultimately less memory overhead. This speaks to the substantial effect 
 activations and batch size also have on peak memory. The reduction we observe reflects activation memory 
 scaling rather than reduced model replication, which remains unchanged under data parallelism.
 
 \subsection{Pipeline Parallelism Microbatch Analysis}\label{sec:exp-pp-side-quest}
+Pipeline parallelism performance is dependent on two things: microbatch count and balancing compute load 
+across the divided layers. While there's minimal control of the load balancing, Megatron provides very 
+explicit control of the microbatch count, which directly affects the bubble 
+overhead~\cite{gpipe2018,1f1b}. Our main experiments ran with a configuration that maximized the bubble 
+overhead, the worst-case configuration.
+
 With our experimental setup, we were able to do an extra handful of pipeline parallelism runs to determine 
 if its poor performance was PCIe related or due to our maximum bubble overhead configuration. We found 
 that GPU utilization stayed mostly the same. On 2 GPUs, the throughput behaved as expected: using a 
@@ -681,7 +391,8 @@ to our surprise, the maximum bubble configuration performed better than the reco
 the medium sized 100M and 300M model parameter models. We believe this is due to the fact that with more 
 devices and more microbatches, there is a multiplicative effect on the amount of communication overhead 
 that PCIe amplifies; alternatively, setting the microbatch size to the minimal allowed amount also 
-minimizes the amount of communication needed. See Appendix \ref{app:mtron-pp-side-quest}.
+minimizes the amount of communication needed. See Appendix \ref{app:mtron-pp-side-quest} for the how 
+the different microbatch sizes behave on 2 and 4 GPUs.
 
 \subsection{ZeRO Results}
 \begin{figure}[t]
@@ -750,7 +461,7 @@ issues fewer and larger all-reduce operations per backward pass. Issuing many re
 increases the communication overhead on PCIe, which we believe contributes to Stage 2's reduced 
 throughput. The number of gradient buckets can be controlled with DeepSpeed's 
 \textit{reduce\_bucket\_size} parameter. We used the default \texttt{5e8}. This parameter and a number of 
-other factors affect the number of buckets, but the number of buckets is not equal to WORLD SIZE, so ZeRO 
+other factors affect the number of buckets, but the number of buckets is not equal to world size, so ZeRO 
 stage-2 will usually require more reduce-scatter calls than stage 1 all-reduce calls.
 
 While stage 3 has the same communication requirements in the backward pass as stage 2, it is likely that 
@@ -820,14 +531,6 @@ various system and model parameters on their behavior.
 \end{itemize}
 
 \begin{thebibliography}{00}
-\begin{comment}
-@article{shalle2018,
-  title={Measuring the effects of data parallelism on neural network training},
-  author={Shallue and others},
-  journal={arXiv preprint	arXiv:1811.03600},
-  year={2018}
-}
-\end{comment}
 
 \bibitem{grattafiori2024llama3herdmodels} A. Grattafiori et al., ``The Llama 3 Herd of Models,'' arXiv 
 preprint arXiv:2407.21783, July 2024.
@@ -913,7 +616,8 @@ use a reduced sequence length of 512 for the 1B model to avoid out-of-memory err
 
 The following appendices provide detailed plots supporting the results discussed in Section V.
 
-\section{Megatron Throughput Plots}\label{app:mtron-throughput}
+\section{Megatron Plots}\label{app:mtron-throughput}
+\subsection{Throughput}
 
 \begin{figure}[!htbp]
     \centering
@@ -944,7 +648,7 @@ The following appendices provide detailed plots supporting the results discussed
 \end{figure}
 \FloatBarrier
 
-\section{Megatron Throughput Efficiency Plots}
+\subsection{Throughput Efficiency Plots}
 
 \begin{figure}[!htbp]
     \centering
@@ -975,7 +679,7 @@ The following appendices provide detailed plots supporting the results discussed
 \end{figure}
 \FloatBarrier
 
-\section{Megatron Peak Memory Usage Plots}
+\subsection{Peak Memory Usage Plots}
 
 \begin{figure}[!htbp]
     \centering
@@ -1006,7 +710,7 @@ The following appendices provide detailed plots supporting the results discussed
 \end{figure}
 \FloatBarrier
 
-\section{Megatron Pipeline Parallelism Analysis Plots}\label{app:mtron-pp-side-quest}
+\subsection{Pipeline Parallelism Analysis Plots}\label{app:mtron-pp-side-quest}
 
 \begin{figure}[!htbp]
     \centering
@@ -1021,7 +725,9 @@ The following appendices provide detailed plots supporting the results discussed
 \end{figure}
 \FloatBarrier
 
-\section{ZeRO Throughput Plots}\label{app:zero-throughput}
+\section{ZeRO Plots}\label{app:zero-plots}
+
+\subsection{Throughput}\label{app:zero-throughput}
 
 \begin{figure}[!htbp]
     \centering
@@ -1052,7 +758,7 @@ The following appendices provide detailed plots supporting the results discussed
 \end{figure}
 \FloatBarrier
 
-\section{ZeRO Throughput Efficiency Plots}
+\subsection{Throughput Efficiency Plots}
 
 \begin{figure}[!htbp]
     \centering
@@ -1083,7 +789,7 @@ The following appendices provide detailed plots supporting the results discussed
 \end{figure}
 \FloatBarrier
 
-\section{ZeRO Peak Memory Usage}\label{app:zero-peak-mem}
+\subsection{Peak Memory Usage}\label{app:zero-peak-mem}
 
 \begin{figure}[!htbp]
     \centering
@@ -1114,10 +820,10 @@ The following appendices provide detailed plots supporting the results discussed
 \end{figure}
 \FloatBarrier
 
-\section{ZeRO Average Memory Usage}\label{app:zero-avg-mem}
+\subsection{Average Memory Usage}\label{app:zero-avg-mem}
 
 It may be expected that ZeRO should consistently reduce average/steady-state GPU memory usage, the 
-fact is when WORLD SIZE is sufficiently small, e.g. 2, the sharded state(s) are likely not exceeding the 
+fact is when world size is sufficiently small, e.g. 2, the sharded state(s) are likely not exceeding the 
 activation memory. So while peak memory is meaningfully affected, average GPU memory benefits are seen at 
 $\geq$ 4 GPUs.
 
@@ -1170,5 +876,313 @@ GPU3 PXB   PXB   PIX    X    SYS   SYS    0-23,48-71         0            N/A
   PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)\\
   PIX  = Connection traversing at most a single PCIe bridge\\
 \FloatBarrier
+
+\section{Training Loop and Metrics Capture}\label{app:trainingloops}
+All experiments follow a similar workflow on every device:
+\begin{enumerate}
+    \item Launch with \textit{torchrun} and a model configuration reference (e.g. "10M", "300M")
+    \item Create a logger for the particular run
+    \item Configure the model with the given configuration reference
+    \item Initialize any required distributed protocol mechanisms
+    \item Prepare a data loader with our synthetic dataset
+    \item Initialize the optimizer
+    \item Run a training loop for 200 steps
+    \item Every iteration, take a snapshot of GPU memory and utilization
+\end{enumerate}
+
+After 200 iterations, total throughput, average GPU memory usage, peak GPU memory, and average GPU 
+utilization per device is logged. These per-device results are the foundational metrics that all
+of our results are derived from. Finally, 8 more steps are executed using PyTorch's profiler, to monitor 
+all CPU and GPU activity. While our experiments still generate the traces for more granular measurements, 
+we were unable to incorporate this data due to time restrictions.
+
+We took care early on to make sure that the log file paths were clear and that the per device logs could 
+be easily aggregated. This was achieved by using properties of the experiment as nested directories. The 
+files containing raw metrics followed the \texttt{cuda\_N.log} naming pattern, where \textit{N} is the 
+device's assigned "rank." Using the model size, strategy, and a unique timestamp for the folder structure 
+allowed for clearly identifiable experimental results. The folder structure template is \texttt{/log/path/
+<strategy>/<model\_size>/<timestamp>/}, e.g. \texttt{megatron\_ddp/10m/1234567890/cuda\_1.log}
+
+In the training loop, all experiments follow the same general pattern:
+\begin{enumerate}
+    \item Zero out gradients of the optimizer
+    \item Synchronize devices via torch.cuda's \textit{synchronize()}
+    \item Run a forward pass
+    \item Compute loss
+    \item Run the optimizer's step
+    \item Synchronize devices once again via torch.cuda's \textit{synchronize()}
+\end{enumerate}
+\FloatBarrier
+
+\section{Metrics Aggregation Derivations}\label{app:derivations}
+As mentioned in \S\ref{methodlogy}, experiment results were logged in a very specific manner: it 
+guarantees that all \textit{cuda\_N.log} files belong to the same experiment. We accomplished consistent 
+aggregations by implementing 3 data classes
+\begin{enumerate}
+    \item \textit{TrainingResults} - the metrics we log after 200 iterations, per device.
+    \item \textit{ExperimentSummary} - aggregate metrics given a list of \textit{TrainingResults} from a 
+    single experiment
+    \item \textit{ComparisonSummary} - comparative metrics given an \textit{ExperimentSummary} and a 
+    target baseline \textit{TrainingResults}
+\end{enumerate}
+
+\S\ref{methodlogy} went over the per device metrics that would be populated in \textit{TrainingResults}. 
+Our final results represent a combination of data from the \textit{ExperimentSummary} and 
+\textit{ComparisonSummary} aggregates. We now provide more depth into \textit{ExperimentSummary} and \textit{ComparisonSummary}.
+
+\subsubsection{ExperimentSummary}
+
+As mentioned across the different strategies in \S\ref{methodlogy}, the computation of "total tokens" is 
+strategy dependent: in the case of data parallelism and ZeRO, all devices see different tokens, so we 
+take the sum; for pipeline parallelism, the last device contains the "total" (the others have 0, so we can 
+still take the sum); for tensor parallelism, all devices see the same tokens, so we choose the max of all 
+devices, which has the same effect as picking a single device. 
+
+The rest of the aggregates are defined as:
+\begin{itemize}
+    \item Total time: the maximum time across the set of \textit{TrainingResults}
+    \item Total throughput: still total tokens $\div$ total time, as just defined in this context
+    \item Average GPU memory: the average across the \textit{TrainingResults} average GPU memory values
+    \item Total GPU memory: the sum across all \textit{TrainingResults} average GPU memory values
+    \item Peak GPU memory: the maximum peak across the set of \textit{TrainingResults}
+    \item Average GPU utilization: the average across the \textit{TrainingResults} average GPU utilization 
+    values
+\end{itemize}
+
+\subsubsection{ComparisonSummary}
+
+Given an \textit{ExperimentSummary} of multiple devices for a specific experiment type and a specific 
+single-GPU baseline, we will now define the following comparative metrics:
+\begin{itemize}
+    \item Relative runtime overhead: how much slower or faster the multi-GPU run is compared to the single GPU run
+    \item Throughput and throughput scaling efficiency
+    \item Peak memory usage
+\end{itemize}
+
+"Relative runtime overhead" tells us how much slower or faster the multi-GPU run 
+is compared to single GPU. We also compute throughput scaling efficiency
+
+\[ (\frac{TotalTime_{MultiGPU}}{TotalTime_{SingleGPU}} - 1) \times 100\]
+
+When $>$0\%, this indicates that the multi-GPU strategy is slower than the single GPU. When the overhead 
+percentages is $<$0\%, then the multi-GPU strategy is operating faster than the single GPU. This captures 
+effective end-to-end overhead, including overlapped communication and computation of the strategy/model/
+framework/etc. This metric is not meant to be a scaling metric. We introduce it as a direct way to measure 
+wall-clock speedup or slowdown.
+
+While Shallue et al. measured batch sizes~\cite{shallue2018}, it sets the basis for computing scaling 
+throughput and efficiencies. The ideal scaling throughput is straightforward, representing the throughput 
+expected under perfect linear scaling: $Throughput_{SingleGPU} \times N_{devices}$. To compute 
+the throughput efficiency, we first need the throughput scaling factor
+\[ \frac{Throughput_{MultiGPU}}{Throughput_{SingleGPU}} \]
+
+The interpretation of the throughput scaling factor is 
+\begin{itemize}
+    \item 1 means the strategy has the same speed as a single GPU
+    \item $<$1 means the strategy is slower than a single GPU
+    \item $>$1 means the strategy is faster than a single GPU
+    \item $\approx$ the number of devices is equivalent to ideal scaling
+\end{itemize}
+Throughput scaling efficiency is then defined by 
+\[ \frac{ThroughputScalingFactor}{N_{devices}} \times 100 \]
+
+When this percentage is 100\%, it means the throughput achieves perfect linear scaling. Efficiency values 
+$\sim$80\% are desirable whereas values $<$70\% indicate poor throughput performance.
+
+We also computed a number of memory scaling factors: average GPU memory, total GPU memory, and peak GPU 
+memory. All of them are computed in the same manner
+\[ \frac{MemoryType_{MultiGPU}}{MemoryType_{SingleGPU}} \]
+
+We interpret these metrics similar to the throughput scaling factor, such that values less than 1 indicate 
+less memory usage than a single GPU, values larger than 1 indicate more memory usage, and values near 1 
+indicate comparable memory usage.
+
+\section{Megatron Implementation Details}\label{app:mtron-impl-details}
+Following NVIDIA's example~\cite{mcore-train-loop-script}, the first thing any Megatron driven experiment 
+does is tear down any previous parallel states. Our experiments only ever run one type of Megatron 
+model-parallel grouping, so this is more a matter of correctness and defensiveness. Next, we initialize 
+the distributed process group to use the NCCL backend. Now, with each device aware of the world size and 
+their respective rank, the specific model-parallel grouping can be initialized for the particular Megatron 
+parallelism (Table \ref{tab:megatron_strat_conf}). By setting tensor or pipeline parallel size to 1 
+effectively disables it from the experiment.
+
+At this point the \textit{GPTModel} can be initialized with a corresponding \textit{TransformerConfig}. 
+The initialization values are driven by the configuration reference provided as an argument to the 
+experiment runner. The \textit{TransformerConfig} handles defining the hidden size, number of attention 
+heads, and the number of layers. The \textit{TransformerConfig} is then given to the \textit{GPTModel} 
+along with the vocabulary size and maximum sequence length.
+
+One other important note is how Megatron's training script configures the forward and backward passes. 
+Normally, in PyTorch, the model is called with an input batch, the logits are returned, and a loss 
+function is applied against the result and the expected values. The idea is similar in Megatron, but they 
+have a wrapper you must use (\textit{forward\_back\_func}) in which you must provide the model, the data 
+iterator, seq len, "micro batch size" (in the case of tensor parallelism, this is the global batch size; 
+data parallelism is $batch\_size \div world size$) and a \textit{forward\_step\_func} you define. This 
+callable takes the data iterator and an instance of your model as arguments. This is where you call the 
+model to get a resulting "output" tensor. You then return this output tensor and a python partial of your 
+loss function and the loss mask, which later, Megatron will call to allow you to compute the loss. This 
+loss function finally returns what your main training loop sees as the loss. This wrapping is likely due 
+to how Megatron is sharding the model across devices and how/when these functions can be called in order 
+to get a meaningful result back to the main training loop.
+
+The three experimental files that leverage the Megatron \textit{GPTModel} are
+\begin{itemize}
+    \item \texttt{tensor\_parallel.py}
+    \item \texttt{megatron\_pipeline\_parallel.py}
+    \item \texttt{megatron\_ddp.py}
+\end{itemize}
+
+These scripts were heavily inspired by the \texttt{run\_simple\_mcore\_train\_loop.py}~
+\cite{mcore-train-loop-script} in NVIDIA's Megatron User Guide~\cite{megatron-user-guide}. This was 
+necessary given how drastically differently Megatron prefers to operate compared to PyTorch.
+
+\begin{table}[htbp]
+\caption{Megatron strategy configurations}
+\label{tab:megatron_strat_conf}
+\begin{center}
+\begin{tabular}{|c|c|c|}
+\hline
+\textbf{Parallelism} &\textbf{Tensor Parallel Size} &\textbf{Pipeline parallel size}\\
+\hline
+Data         &1          &1 \\
+\hline
+Tensor       &world size &1 \\
+\hline
+Pipeline     &1          &world size \\
+\hline
+\end{tabular}
+\end{center}
+\end{table}
+
+The following sections describe the slight differences of each Megatron strategy.
+
+\subsubsection{Tensor Parallelism}
+
+This was the first experiment we built using the \textit{GPTModel}. One might also notice that it 
+is the only file that deviates from the \texttt{megatron\_*.py} naming convention. This was because we 
+originally started experimenting with the other strategies on the lightweight transformer decoder model 
+first. When we realized how drastically different Megatron-core behaved and how we could not simply 
+"wrap" our model with Megatron, we pivoted to an "all Megatron" approach, given the "out of the box" 
+support for the other distributed training strategies\footnote{With the exception of ZeRO, where we were 
+forced to reuse our lightweight model, given ZeRO and Megatron's incompatibility.}.
+
+In retrospect, tensor parallelism was one of the most straightforward strategies to implement, once we 
+understood how Megatron-core prefers to configure models and how it handles the forward and backward 
+passes. This experiment uses a PyTorch \textit{DataLoader} with batch size set to the global batch size, 
+per the experiment configuration. Every device must see the identical inputs at every step: each layer is 
+sharded across multiple devices and thus still needs the entire input set to be able to process the 
+forward pass. The tensor parallel size is set to the world size while the pipeline parallel size is set to 
+1 for all tensor parallelism experiments (Table \ref{tab:megatron_strat_conf}). The Megatron framework 
+handles how the weights of a layer are sharded across the devices, but they do support some level of 
+configuration as to how how the weights can be sharded.
+
+For tensor parallelism to function given the weight sharding, forward and backward passes require 
+communication:
+\begin{itemize}
+    \item Forward: activations are communicated via all-gather or reduce-scatter
+    \item Backward: gradients are communicated via all-reduce or reduce-scatter
+\end{itemize}
+The communication type is dependent on the layer type.
+
+When computing "total tokens" for throughput across multiple devices, because all devices see the same 
+batch size, but each step requires that all devices process the batch, we can take the total number of 
+tokens from any device in the experiment.
+
+\subsubsection{Data Parallelism}\label{sec:3.a.2-dp}
+
+Megatron follows a very similar pattern to PyTorch's data parallelism approach; they both provide a 
+\textit{DataDistributedParallel} wrapper that wraps your model to support data parallelism. The primary 
+difference is Megatron has a separate \textit{DataDistributedParallelConfig} that provides many features 
+to tweak and optimize how the data parallelism behaves. One important note is that Megatron provides a 
+"Distributed Optimizer" which you can enable in the configuration. This has the effect of making the 
+strategy behave similar to ZeRO-1 where the optimizer states is sharded across devices. We made sure not 
+to use this feature, to ensure that the data parallel experiment behaves in a traditional manner.
+
+Aside from this, the main difference between the tensor and data parallelism experiments is the data 
+loader used and its configured batch size. When doing distributed data parallelism, a PyTorch
+\textit{DistributedSampler} must be used and provided to the data loader. The data loader's 
+batch size is set to \textit{$batch\_size \div world\_size$}. This has the effect of lower memory (fewer 
+activations are stored compared to a single GPU baseline) and, in the case of smaller models, reducing 
+GPU utilization. This guarantees that the total number of tokens seen by the "world" matches 
+the total seen by the single GPU baseline, given that each device is processing a unique set of tokens. 
+For data parallelism, Megatron is configured with both tensor parallel and pipeline parallel sizes set to 
+1 (Table \ref{tab:megatron_strat_conf}).
+
+Unlike tensor parallelism, there is no communication necessary on the forward pass, as each device has the 
+entire model replicated and can operate completely independently of the other. However, on the backward 
+pass, an all-reduce on each parameter's gradients is required so that all devices apply the same optimizer 
+update.
+
+While we split the global batch size across the number of devices in data parallelism, each device 
+processes a unique set of tokens, so when we compute total tokens for the strategy, we actually take the 
+sum of "total tokens" across all devices.
+
+\subsubsection{Pipeline Parallelism}
+
+Pipeline parallelism is a strategy that differs quite a bit from the other two discussed strategies. 
+First, pipeline parallelism splits the layers in their entirety across available devices, e.g. layer 0 and 
+1 are on device 1, layer 2 and 3 are on device 2, etc. The grouping of layers are called "stages." The 
+Megatron framework handles how to separate the stages, although they do support customizing the 
+stages\footnote{We originally had a PyTorch implementation of GPipe with the 
+\textit{SimpleTransformerDecoder} model. PyTorch allows much more flexibility with how to load balance 
+stages, but that also comes with its own complexity cost - getting it right is not easy.}. However, this 
+is only for the transformer layers; you must define which device will handle the embeddings and the output 
+layer. We always make the first rank responsible for embeddings and the last rank responsible for the 
+output layer.
+
+Second, pipeline parallelism operates on "microbatches" of the original batch size. For both the forward 
+and backward pass of training, each device trains the model on these microbatches sequentially, i.e. 
+device 1 sees the first microbatch, then, while device 1 sees the second microbatch, device 2 begins work 
+on the first microbatch. After all devices complete the forward pass, the same sequence is done in reverse 
+for the backward pass.
+
+This inherently requires a scheduling algorithm. The first of such algorithms was GPipe~\cite{gpipe2018} 
+but Megatron does not use this. Instead, the scheduler used is 1F1B~\cite{1f1b}\footnote{This is the 
+default scheduler provided, which we used for our experiments. There is another interleaved 1F1B variant 
+available.}. The primary difference between 1F1B and GPipe is
+\begin{itemize}
+    \item GPipe: All devices do forward microbatches of batch, then all devices do backward microbatches of batch.
+    \item 1F1B: After reaching a "steady-state" of microbatches at the start, the algorithm alternates "one forward, one backward" pass until the end of the batch.
+\end{itemize}
+For the purposes of our study, this has no effect, as both GPipe and 1F1B are subject to the same "bubble 
+overhead" ratio: $(p - 1)/m$ where $p$ is the number of stages and $m$ is the number of microbatches. In 
+theory, pipeline performance increases when $m >> p$, but more practically the recommendation is generally 
+$m \approx 4p$. Conversely, the configuration that maximizes the bubble overhead is $m = p$, which we 
+later realized was the configuration we used in our experiments. With this in mind, we ran another set of 
+pipeline parallel experiments on 10M/100M/300M parameter models with a fixed sequence length of 512 and 
+batch size of 32 across all model sizes to determine if the performance results were due to our 
+configuration or because of the PCIe infrastructure. The 500M and 1B parameter models were not included, 
+as they generated out-of-memory errors with these sequence length and batch size values. We modified these 
+values to guarantee the configuration generated enough compute related stress on the GPU to make 
+communication beneficial and give the strategy the best opportunity to demonstrate its capabilities. 
+\S\ref{sec:exp-pp-side-quest} shows the results of this experiment.
+
+Given that each device is involved in the backward and forward pass, both passes require communication. 
+That said, pipeline parallelism only requires that each device communicates with its immediate neighboring 
+rank.
+\begin{itemize}
+    \item On the forward pass, the $i_n$ device sends activations to device $i_{n+1}$.
+    \item On the backward pass, the $i_n$ device sends gradients to device $i_{n-1}$.
+\end{itemize}
+
+We only compute the total number of tokens seen by the strategy at the last rank, as this rank is 
+responsible for starting the backward pass. Our logic was that the moment the backward pass begins on the 
+last rank, then all tokens have flowed from beginning to end. All previous ranks have their total tokens 
+value set to 0. The global batch size is preserved across microbatches; increasing the number of 
+microbatches reduces per-microbatch size but does not change total tokens processed per optimizer step.
+
+\section{ZeRO Configuration Reasons}\label{app:zero-conf-details}
+During the initial set of ZeRO experiments, we observed that memory consumption appeared nearly unchanged 
+across ZeRO stages for smaller models. To further stress the optimizer-state sharding behavior and make 
+memory differences more apparent, we increased the global batch size used by all ZeRO configurations to 
+16. Achieving this global batch size on 2 and 4 GPU configurations required setting 
+\textit{gradient\_accumulation\_steps} (GAS) to 4, which produced per-GPU microbatch sizes of 2 (2 GPUs) 
+and 1 (4 GPUs). This adjustment also required maintaining a separate set of ZeRO configurations from the 
+one's used with in our Megatron models. Note that ZeRO's "microbatches" are unrelated to pipeline 
+parallelism's microbatches.
+
+We later discovered a bug in our initial ZeRO training loop: we were executing $200 \times GAS$ iterations 
+instead of the planned 200 optimizer steps. After fixing the step-counting logic, we reran all ZeRO 
+experiments using the same configurations (e.g., batch size, GAS) without modifying any hyperparameters. All results reported in this paper reflect the corrected implementation.
 
 \end{document}
