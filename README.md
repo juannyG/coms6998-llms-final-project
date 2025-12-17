@@ -59,10 +59,43 @@ To run the full suite of experiments:
 make all
 ```
 The Makefile defines targets by:
-- Strategy (megatron_ddp, megatron_tensor, megatron_pipeline, zero)
-- Model size (10M, 100M, 300M, 500M, 1B)
-- Number of GPUs (1, 2, 4)
+* Strategy (megatron_ddp, megatron_tensor, megatron_pipeline, zero)
+* Model size (10M, 100M, 300M, 500M, 1B)
+* Number of GPUs (1, 2, 4)
 
-See the Makefile for the complete list of targets and exact naming.
+See the [Makefile](src/Makefile) for the complete list of targets and exact naming.
 
+## Metrics and Result Aggregation
 
+After experiments complete, logs are aggregated into:
+* CLI-formatted tables
+* CSV files used for plotting and analysis
+
+See the [Makefile](src/Makefile) for generating CLI-formatted tables, but here's one example to compare the 1B ZeRO stage3-offload runs on 2 and 4 GPUs against the 1B single GPU baseline:
+```bash
+make metrics_zero3offload_1b
+```
+
+The metrics script(s) assume files are located in `../logs`. If you wish to recreate with our results, you'll need to create a softlink to the specific result types:
+```
+ln -s results/raw_data/20251128-simple-single-and-zero-logs ../logs
+```
+
+Now you can use [Makefile](src/Makefile) to view any CLI-formatted comparison tables for any of our ZeRO runs.
+
+Plot and CSV generation scripts assume specific log directory layouts. The plot generates contain hardcoded paths. These reflect the structure used during the experiments and were not fully generalized due to time constraints.
+
+Our Megatron and ZeRO runs were located in separate log paths, e.g. `../logs/megatron/*` and `../logs/zero/*` which we manually created and moved the raw data to.
+
+This allowed us to generate our specific CSVs, e.g. for Megatron:
+```
+python tools/metrics/summary.py all --dir ../logs/megatron/ --target-file ../results/single-tp-dpp-pp-experiment-results.csv
+```
+
+The plot generators hardcode the `../results/*.csv` seen in the repository.
+
+## Notes and Limitations
+
+- ZeRO experiments use a lightweight GPT-like PyTorch model due to incompatibility between Megatron's GPTModel and standalone ZeRO.
+- ZeRO results are analyzed independently and not directly compared against Megatron results.
+- Some scripts assume specific directory layouts and were not fully refactored for general use.
