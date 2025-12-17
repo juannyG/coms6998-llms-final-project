@@ -12,13 +12,27 @@ W&B Report: [See here](https://wandb.ai/jmg2048-columbia-university/fall25-sllm-
 This repository contains the code used to run and aggregate experiments comparing distributed training strategies (Megatron-LM TP/DDP/PP and DeepSpeed ZeRO) on PCIe-connected NVIDIA RTX A6000 GPUs. Experiments measure throughput, scaling efficiency, and GPU memory usage across models from 10M to 1B parameters. Experiments use a fixed-shape synthetic dataset to eliminate data variability and do not measure model quality.
 
 ## Repository layout
-* `src/run_experiment.py`: main driver invoked by Make targets
-* `src/experiments/megatron_ddp.py`, `src/experiments/tensor_parallel.py`, `src/experiments/megatron_pipeline_parallel.py`: Megatron-LM experiments
-* `src/experiments/simple_zero.py` + `src/experiments/simple_single.py`: GPT-like PyTorch model used for ZeRO tests
-* `src/configs.py`: model configs (10M through 1B) and key hyperparameters
-* `src/datasets/synthetic.py`: deterministic synthetic dataset
-* `src/tools/metrics/*`: aggregation scripts which compute/format summary tables + CSVs
-* `results/`: raw, aggregated, and plotted data from our experimental runs
+
+```
+.
+├── results                                   # Raw, aggregated, and plotted data from our experimental runs
+└── src
+    ├── configs.py                            # Model configurations (10M through 1B) and hyperparameters
+    ├── datasets
+    │   └── synthetic.py                      # Deterministic fixed-shape synthetic dataset
+    ├── experiments
+    │   ├── megatron_ddp.py                   # Megatron data parallelism experiment
+    │   ├── megatron_pipeline_parallel.py     # Megatron pipeline parallelism experiment
+    │   ├── tensor_parallel.py                # Megatron tensor parallelism experiment
+    │   ├── simple_single.py                  # Single GPU baseline (PyTorch GPT-like model)
+    │   ├── simple_zero.py                    # ZeRO experiments using GPT-like PyTorch model
+    ├── run_experiment.py                     # Main driver invoked by Make targets
+    ├── tools
+    │   ├── metrics                           # Metric aggregation scripts (summary tables + CSVs)
+    ├── zero_configs                          # ZeRO configuration YAMLs
+    ├── Makefile                              # Experiment orchestration
+└── README.md
+```
 
 ## Environment Setup
 
