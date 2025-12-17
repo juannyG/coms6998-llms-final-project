@@ -1,56 +1,68 @@
-# coms6998-llms-final-project
+# Distributed Training Strategies on Commodity Hardware (PCIe)
 
-Examples:
-```sh
-# Run a single GPU experiment with 10m paramemters
-python run_experiment.py single_gpu 10m
+Authors:
+* Can Kerem Akbulut, cka2115@columbia.edu
+* Rakene Chowdhury, rc3574@columbia.edu
+* Juan Gutierrez, jmg2048@columbia.edu
 
-# "Dry run" the experiment - only print out model param info
-python run_experiment.py --dry-run single_gpu cpu
-```
+Paper: [See here](overleaf/Fall25-COMS6998-Scaling_LLMs-Distributed_Training_Strategies_on_Commodity_Hardware.pdf)
 
-## Setting up the python environment
-While HPC likes to use `conda`, creating a new environment seems to be broken. Try if you can and we can update this later.
-So far, I was able to set up a virtualenv and install packages in it:
+W&B Report: [See here](https://wandb.ai/jmg2048-columbia-university/fall25-sllm-final-project/reports/Distributed-Training-Strategies-on-Commodity-Hardware-Dashboard--VmlldzoxNTM4MTA1Mg?accessToken=npt0nk8y29m84ueagcb8t8p69j2vz7nb596arm0pa1r54nvgs7zdr1d7741f16rf)
 
-```sh
-# Connect to insomnia
-ssh <UNI>@insomnia.rcs.columbia.edu
+This repository contains the code used to run and aggregate experiments comparing distributed training strategies (Megatron-LM TP/DDP/PP and DeepSpeed ZeRO) on PCIe-connected NVIDIA RTX A6000 GPUs. Experiments measure throughput, scaling efficiency, and GPU memory usage across models from 10M to 1B parameters. Experiments use a fixed-shape synthetic dataset to eliminate data variability and do not measure model quality.
 
-# Move to a compute node (if you want a GPU, add --gres=gpu:1 - useful if you want to use things like nvidia-smi)
-srun --pty -t 0-2:00 -A edu /bin/bash
+## Repository layout
+* `src/run_experiment.py`: main driver invoked by Make targets
+* `src/experiments/megatron_ddp.py`, `src/experiments/tensor_parallel.py`, `src/experiments/megatron_pipeline_parallel.py`: Megatron-LM experiments
+* `src/experiments/simple_zero.py` + `src/experiments/simple_single.py`: GPT-like PyTorch model used for ZeRO tests
+* `src/configs.py`: model configs (10M through 1B) and key hyperparameters
+* `src/datasets/synthetic.py`: deterministic synthetic dataset
+* `src/tools/metrics/*`: aggregation scripts which compute/format summary tables + CSVs
+* `results/`: raw, aggregated, and plotted data from our experimental runs
 
-# Move into your scratch space and set up the environment
-cd /insomnia001/depts/edu/COMS-E6998-015/<UNI>
+## Environment Setup
 
-# Create the env dir; default name provided
-/insomnia001/shared/apps/anaconda/2023.09/bin/python -m venv sllm-final-project-env
-cd sllm-final-project-env
-source bin/activate
+Hardware Requirements:
+* NVIDIA GPUs (tested on RTX A6000)
+* CUDA + NCCL support
+* Multi-GPU system for distributed experiments
 
-# Clone the repo and install reqs
+Note: Experiments were run on PCIe-connected GPUs (no NVLink).
+
+We recommend using a Python virtual environment, specifically Python 3.12.3.
+
+```bash
+python -m venv venv
+source venv/bin/activate
+
 git clone git@github.com:juannyG/coms6998-llms-final-project.git proj
 cd proj
+
 pip install -r requirements.txt
+
+cd src
 ```
 
-# Tips/Tricks
-## .bashrc "setup" function
-Add the following blurb to your `$HOME/.bashrc`:
-```sh
-setup_venv() {
-    cd /insomnia001/depts/edu/COMS-E6998-015/<UNI>/sllm-final-project-env
-    source bin/activate
-    cd proj
-    pip install -r requirements.txt
-}
+## Running Experiments
+
+All experiments are orchestrated via a [Makefile](src/Makefile). Logs are written to a configurable directory and later aggregated into tables and CSVs.
+
+Before running experiments, create a log directory:
+
+```bash
+mkdir -p ../logs
 ```
 
-After you login and move to a compute node in HPC you can then run:
-```sh
-source .bashrc
-setup_venv
-```
-This will put you in the repo directory with virtualenv already activated.
+To run the full suite of experiments:
 
-# TODO: How to run using Makefile
+```bash
+make all
+```
+The Makefile defines targets by:
+- Strategy (megatron_ddp, megatron_tensor, megatron_pipeline, zero)
+- Model size (10M, 100M, 300M, 500M, 1B)
+- Number of GPUs (1, 2, 4)
+
+See the Makefile for the complete list of targets and exact naming.
+
+
