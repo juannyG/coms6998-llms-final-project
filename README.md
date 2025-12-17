@@ -83,7 +83,7 @@ The metrics script(s) assume files are located in `../logs`. If you wish to recr
 ln -s results/raw_data/20251128-simple-single-and-zero-logs ../logs
 ```
 
-Now you can use [Makefile](src/Makefile) to view any CLI-formatted comparison tables for any of our ZeRO runs.
+Now you can use the [Makefile](src/Makefile) to view any CLI-formatted comparison tables for any of our ZeRO runs.
 
 Plot and CSV generation scripts assume specific log directory layouts. The plot generators contain hardcoded paths. These reflect the structure used during the experiments and were not fully generalized due to time constraints.
 
