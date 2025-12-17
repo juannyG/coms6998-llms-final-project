@@ -233,8 +233,42 @@ metrics_tp_%:
 metrics_pp_%:
 	python tools/metrics/summary.py compare --baseline $(LOG_PATH)/single_gpu/$*/*/cuda_0.log --dir $(LOG_PATH)/megatron_pipeline_parallel/$*
 
-#metrics_zero_%:
-#	python tools/metrics/summary.py compare --baseline $(LOG_PATH)/single_gpu/$*/*/cuda_0.log --dir $(LOG_PATH)/TODO/$*
+metrics_zero1: \
+	metrics_zero1_10m \
+	metrics_zero1_100m \
+	metrics_zero1_300m \
+	metrics_zero1_500m \
+	metrics_zero1_1b
 
+metrics_zero2: \
+	metrics_zero2_10m \
+	metrics_zero2_100m \
+	metrics_zero2_300m \
+	metrics_zero2_500m \
+	metrics_zero2_1b
 
+metrics_zero3offload: \
+	metrics_zero3offload_10m \
+	metrics_zero3offload_100m \
+	metrics_zero3offload_300m \
+	metrics_zero3offload_500m \
+	metrics_zero3offload_1b
 
+metrics_zero3: \
+	metrics_zero3_10m \
+	metrics_zero3_100m \
+	metrics_zero3_300m \
+	metrics_zero3_500m \
+	metrics_zero3_1b
+
+metrics_zero1_%:
+	python tools/metrics/summary.py compare --baseline $(LOG_PATH)/simple_single_gpu/zero-$*/*/cuda_0.log --dir $(LOG_PATH)/simple_zero_stage1/zero-$*
+
+metrics_zero2_%:
+	python tools/metrics/summary.py compare --baseline $(LOG_PATH)/simple_single_gpu/zero-$*/*/cuda_0.log --dir $(LOG_PATH)/simple_zero_stage2/zero-$*
+
+metrics_zero3_%:
+	python tools/metrics/summary.py compare --baseline $(LOG_PATH)/simple_single_gpu/zero-$*/*/cuda_0.log --dir $(LOG_PATH)/simple_zero_stage3/zero-$*
+
+metrics_zero3offload_%:
+	python tools/metrics/summary.py compare --baseline $(LOG_PATH)/simple_single_gpu/zero-$*/*/cuda_0.log --dir $(LOG_PATH)/simple_zero_stage3_offload/zero-$*
