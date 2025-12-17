@@ -29,7 +29,7 @@ Hardware Requirements:
 
 Note: Experiments were run on PCIe-connected GPUs (no NVLink).
 
-We recommend using a Python virtual environment, specifically Python 3.12.3.
+We recommend using a Python virtual environment, tested with Python 3.12.3.
 
 ```bash
 python -m venv venv
@@ -46,6 +46,8 @@ cd src
 ## Running Experiments
 
 All experiments are orchestrated via a [Makefile](src/Makefile). Logs are written to a configurable directory and later aggregated into tables and CSVs.
+
+Note: Re-running the full experiment suite requires a multi-GPU system and can take several hours. The repository includes raw results and aggregated CSVs used in the paper.
 
 Before running experiments, create a log directory:
 
@@ -83,7 +85,7 @@ ln -s results/raw_data/20251128-simple-single-and-zero-logs ../logs
 
 Now you can use [Makefile](src/Makefile) to view any CLI-formatted comparison tables for any of our ZeRO runs.
 
-Plot and CSV generation scripts assume specific log directory layouts. The plot generates contain hardcoded paths. These reflect the structure used during the experiments and were not fully generalized due to time constraints.
+Plot and CSV generation scripts assume specific log directory layouts. The plot generators contain hardcoded paths. These reflect the structure used during the experiments and were not fully generalized due to time constraints.
 
 Our Megatron and ZeRO runs were located in separate log paths, e.g. `../logs/megatron/*` and `../logs/zero/*` which we manually created and moved the raw data to.
 
