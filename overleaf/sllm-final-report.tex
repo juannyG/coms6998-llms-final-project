@@ -381,7 +381,8 @@ Pipeline parallelism performance is dependent on two things: microbatch count an
 across the divided layers. While there's minimal control of the load balancing, Megatron provides very 
 explicit control of the microbatch count, which directly affects the bubble 
 overhead~\cite{gpipe2018,1f1b}. Our main experiments ran with a configuration that maximized the bubble 
-overhead, the worst-case configuration.
+overhead, the worst-case configuration. See Appendix \ref{app:mtron-impl-detail-pp} for more details about 
+pipeline parallelism in Megatron and how microbatches affect the bubble overhead.
 
 With our experimental setup, we were able to do an extra handful of pipeline parallelism runs to determine 
 if its poor performance was PCIe related or due to our maximum bubble overhead configuration. We found 
@@ -1117,7 +1118,7 @@ While we split the global batch size across the number of devices in data parall
 processes a unique set of tokens, so when we compute total tokens for the strategy, we actually take the 
 sum of "total tokens" across all devices.
 
-\subsection{Pipeline Parallelism}
+\subsection{Pipeline Parallelism}\label{app:mtron-impl-detail-pp}
 
 Pipeline parallelism is a strategy that differs quite a bit from the other two discussed strategies. 
 First, pipeline parallelism splits the layers in their entirety across available devices, e.g. layer 0 and 
