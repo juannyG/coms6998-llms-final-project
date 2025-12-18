@@ -9,7 +9,33 @@ Paper: [See here](overleaf/Fall25-COMS6998-Scaling_LLMs-Distributed_Training_Str
 
 W&B Report: [See here](https://wandb.ai/jmg2048-columbia-university/fall25-sllm-final-project/reports/Distributed-Training-Strategies-on-Commodity-Hardware-Dashboard--VmlldzoxNTM4MTA1Mg?accessToken=npt0nk8y29m84ueagcb8t8p69j2vz7nb596arm0pa1r54nvgs7zdr1d7741f16rf)
 
-This repository contains the code used to run and aggregate experiments comparing distributed training strategies (Megatron-LM TP/DDP/PP and DeepSpeed ZeRO) on PCIe-connected NVIDIA RTX A6000 GPUs. Experiments measure throughput, scaling efficiency, and GPU memory usage across models from 10M to 1B parameters. Experiments use a fixed-shape synthetic dataset to eliminate data variability and do not measure model quality.
+## Problem Statement
+
+This repository contains the code used to run and aggregate experiments comparing distributed training strategies (Megatron-LM TP/DDP/PP and DeepSpeed ZeRO) on PCIe-connected NVIDIA RTX A6000 GPUs. Experiments measure throughput, scaling efficiency, and GPU memory usage across models from 10M to 1B parameters. Experiments use a fixed-shape synthetic dataset to eliminate data variability and do not measure model quality. Note: This project focuses on system performance and scaling behavior rather than model accuracy.
+
+
+## Model Description
+
+We evaluate two transformer-based model implementations:
+
+- [Megatron-LM GPTModel, PyTorch](https://docs.nvidia.com/megatron-core/developer-guide/latest/user-guide/quickstart.html):
+  - Used for tensor, data, and pipeline parallelism experiments
+  - Implements standard decoder-only transformer architectures
+
+- [Custom GPT-like PyTorch model](src/models/simple.py):
+  - Used for DeepSpeed ZeRO experiments
+  - Architecturally similar to GPT-style decoders
+  - Required due to incompatibility between Megatron GPTModel and standalone ZeRO
+
+## Final Results Summary
+
+| Metric | Summary |
+|------|--------|
+| Best throughput (2 GPUs) | Megatron DDP, ZeRO Stage 1 (≥300M) |
+| Best memory savings | ZeRO Stage 3-Offload |
+| 4-GPU scaling on PCIe | Poor for all Megatron strategies |
+| Small model scaling (≤100M) | Negative scaling due to communication overhead |
+| Hardware | 1–4× RTX A6000 (PCIe) |
 
 ## Repository layout
 
@@ -109,6 +135,18 @@ python tools/metrics/summary.py all --dir ../logs/megatron/ --target-file ../res
 ```
 
 The plot generators hardcode the `../results/*.csv` seen in the repository.
+
+## Quickstart
+```
+pip install -r requirements.txt
+mkdir -p ../logs
+cd src/
+make simple_single_10m
+make simple_zero1_2gpu_10m
+make metrics_zero1_10m
+```
+
+Some cloud environments (e.g., RunPod.io) require `export NCCL_P2P_LEVEL=NVL` even without NVLink present
 
 ## Notes and Limitations
 
