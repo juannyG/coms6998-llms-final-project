@@ -169,11 +169,10 @@ Each transformer layer implements:
     \item Residual connections around both attention and feedforward blocks
 \end{itemize}
 
-The model uses identical hyperparameters to the Megatron experiments (Table \ref{tab:model_confs}) but 
-implements standard PyTorch parameter management instead of Megatron's custom parameter sharding, enabling 
-ZeRO compatibility. The configuration differences between ZeRO and the Megatron experiments are only in 
-the batch size and sequence lengths used, due to ZeRO's microbatching strategy, see \ref{tab:zero_confs}. 
-The optimizer used for the ZeRO experiments was once again Adam, with a learning rate of \texttt{2e-4}.
+The model uses identical hyperparameters to the Megatron experiments (Table \ref{tab:model_confs}). The 
+configuration differences between ZeRO and the Megatron experiments are only in the batch size and 
+sequence lengths used, due to ZeRO's microbatching strategy, see Appendix \ref{app:zero-conf-details}. The 
+optimizer used for the ZeRO experiments was once again Adam, with a learning rate of \texttt{2e-4}.
 
 \section{Training and Profiling Methodology}\label{methodlogy}
 
@@ -205,6 +204,12 @@ GPU memory and utilization were measured using NVIDIA's pyNVML~\cite{pyNVML}. Th
 memory provide the most meaningful metrics to our study, but average GPU utilization also showed 
 interesting results, e.g. when a GPU has high utilization but very low throughput compared to a single GPU 
 baseline.
+
+Final metrics are computed using aggregated per-device measurements following standard distributed 
+training practices; full aggregation definitions are provided in Appendix~\ref{app:derivations}.
+
+Our survey does not perform hyperparameter or kernel-level performance tuning in order to isolate 
+the effects of parallelization strategy under identical configurations.
 
 It is worth mentioning some of the nuances and differences of model and strategy. The following sections 
 go into these details.
@@ -301,11 +306,6 @@ tensor parallel size to 1.
 
 For the ZeRO baselines, we had a separate python script with an identical training loop to the ZeRO 
 experiment which we run directly with \textit{python}.
-
-Final metrics are computed using aggregated per-device measurements following standard distributed 
-training practices; full aggregation definitions are provided in Appendix~\ref{app:derivations}.
-
-Our survey does not perform hyperparameter or kernel-level performance tuning. 
 
 \section{Experimental Results with analysis}
 
@@ -1056,7 +1056,7 @@ Pipeline     &1          &world size \\
 
 The following sections describe the slight differences of each Megatron strategy.
 
-\subsubsection{Tensor Parallelism}
+\subsection{Tensor Parallelism}
 
 This was the first experiment we built using the \textit{GPTModel}. One might also notice that it 
 is the only file that deviates from the \texttt{megatron\_*.py} naming convention. This was because we 
@@ -1088,7 +1088,7 @@ When computing "total tokens" for throughput across multiple devices, because al
 batch size, but each step requires that all devices process the batch, we can take the total number of 
 tokens from any device in the experiment.
 
-\subsubsection{Data Parallelism}\label{sec:3.a.2-dp}
+\subsection{Data Parallelism}\label{sec:3.a.2-dp}
 
 Megatron follows a very similar pattern to PyTorch's data parallelism approach; they both provide a 
 \textit{DataDistributedParallel} wrapper that wraps your model to support data parallelism. The primary 
@@ -1117,7 +1117,7 @@ While we split the global batch size across the number of devices in data parall
 processes a unique set of tokens, so when we compute total tokens for the strategy, we actually take the 
 sum of "total tokens" across all devices.
 
-\subsubsection{Pipeline Parallelism}
+\subsection{Pipeline Parallelism}
 
 Pipeline parallelism is a strategy that differs quite a bit from the other two discussed strategies. 
 First, pipeline parallelism splits the layers in their entirety across available devices, e.g. layer 0 and 
