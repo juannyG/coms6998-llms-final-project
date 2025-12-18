@@ -120,7 +120,7 @@ make metrics_zero3offload_1b
 
 The metrics script(s) assume files are located in `../logs`. If you wish to recreate with our results, you'll need to create a softlink to the specific result types:
 ```
-ln -s results/raw_data/20251128-simple-single-and-zero-logs ../logs
+ln -s ../results/raw_data/20251128-simple-single-and-zero-logs ../logs
 ```
 
 Now you can use the [Makefile](src/Makefile) to view any CLI-formatted comparison tables for any of our ZeRO runs.
@@ -139,7 +139,7 @@ The plot generators hardcode the `../results/*.csv` seen in the repository.
 ## Quickstart
 ```
 pip install -r requirements.txt
-mkdir -p ../logs
+mkdir -p logs
 cd src/
 make simple_single_10m
 make simple_zero1_2gpu_10m
