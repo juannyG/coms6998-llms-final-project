@@ -14,6 +14,11 @@ PLOTS_PATH = Path(__file__).parent.parent.parent.parent.joinpath("results/plots/
 
 
 PLOT_CHOICE_KWARGS_MAP = {
+    "avg_mem_savings": {
+        "metric": "avg_gpu_mem_mb",
+        "ylabel": "Avgerage GPU Memory (MB)",
+        "title": "Average Memory Savings vs Zero Stage",
+    },
     "peak_mem_savings": {
         "metric": "peak_gpu_mem_mb",
         "ylabel": "Peak GPU Memory (MB)",
